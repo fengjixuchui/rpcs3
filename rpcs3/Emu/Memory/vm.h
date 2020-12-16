@@ -1,11 +1,16 @@
-﻿#pragma once
+#pragma once
 
 #include <map>
 #include <memory>
-#include "Utilities/types.h"
-#include "Utilities/VirtualMemory.h"
+#include "util/types.hpp"
 #include "Utilities/StrFmt.h"
-#include "Utilities/BEType.h"
+
+#include "util/to_endian.hpp"
+
+namespace utils
+{
+	class shm;
+}
 
 namespace vm
 {
@@ -48,11 +53,28 @@ namespace vm
 	// Address type
 	enum addr_t : u32 {};
 
+	// Page information
+	using memory_page = atomic_t<u8>;
+
 	// Change memory protection of specified memory region
 	bool page_protect(u32 addr, u32 size, u8 flags_test = 0, u8 flags_set = 0, u8 flags_clear = 0);
 
 	// Check flags for specified memory range (unsafe)
-	bool check_addr(u32 addr, u32 size = 1, u8 flags = page_readable);
+	bool check_addr(u32 addr, u8 flags, u32 size);
+
+	template <u32 Size = 1>
+	bool check_addr(u32 addr, u8 flags = page_readable)
+	{
+		extern std::array<memory_page, 0x100000000 / 4096> g_pages;
+
+		if (Size - 1 >= 4095u || Size & (Size - 1) || addr % Size)
+		{
+			// TODO
+			return check_addr(addr, flags, Size);
+		}
+
+		return !(~g_pages[addr / 4096] & (flags | page_allocated));
+	}
 
 	// Search and map memory in specified memory location (min alignment is 0x10000)
 	u32 alloc(u32 size, memory_location_t location, u32 align = 0x10000);
@@ -65,6 +87,9 @@ namespace vm
 
 	// dealloc() with no return value and no exceptions
 	void dealloc_verbose_nothrow(u32 addr, memory_location_t location = any) noexcept;
+
+	// utils::memory_lock wrapper for locking sudo memory
+	void lock_sudo(u32 addr, u32 size);
 
 	// Object that handles memory allocations inside specific constant bounds ("location")
 	class block_t final
@@ -88,7 +113,7 @@ namespace vm
 		const u64 flags; // Currently unused
 
 		// Search and map memory (min alignment is 0x10000)
-		u32 alloc(u32 size, u32 align = 0x10000, const std::shared_ptr<utils::shm>* = nullptr, u64 flags = 0);
+		u32 alloc(u32 size, const std::shared_ptr<utils::shm>* = nullptr, u32 align = 0x10000, u64 flags = 0);
 
 		// Try to map memory at fixed location
 		u32 falloc(u32 addr, u32 size, const std::shared_ptr<utils::shm>* = nullptr, u64 flags = 0);
@@ -97,7 +122,7 @@ namespace vm
 		u32 dealloc(u32 addr, const std::shared_ptr<utils::shm>* = nullptr);
 
 		// Get memory at specified address (if size = 0, addr assumed exact)
-		std::pair<u32, std::shared_ptr<utils::shm>> get(u32 addr, u32 size = 0);
+		std::pair<u32, std::shared_ptr<utils::shm>> peek(u32 addr, u32 size = 0);
 
 		// Get allocated memory count
 		u32 used();
@@ -149,12 +174,11 @@ namespace vm
 	template<>
 	struct cast_impl<u32>
 	{
-		static vm::addr_t cast(u32 addr, const char* /*loc*/)
-		{
-			return static_cast<vm::addr_t>(addr);
-		}
-
-		static vm::addr_t cast(u32 addr)
+		static vm::addr_t cast(u32 addr,
+			u32,
+			u32,
+			const char*,
+			const char*)
 		{
 			return static_cast<vm::addr_t>(addr);
 		}
@@ -163,41 +187,37 @@ namespace vm
 	template<>
 	struct cast_impl<u64>
 	{
-		static vm::addr_t cast(u64 addr, const char* /*loc*/)
+		static vm::addr_t cast(u64 addr,
+			u32 line,
+			u32 col,
+			const char* file,
+			const char* func)
 		{
-			return static_cast<vm::addr_t>(static_cast<u32>(addr));
-		}
-
-		static vm::addr_t cast(u64 addr)
-		{
-			return static_cast<vm::addr_t>(static_cast<u32>(addr));
+			return static_cast<vm::addr_t>(::narrow<u32>(addr, line, col, file, func));
 		}
 	};
 
 	template<typename T, bool Se>
 	struct cast_impl<se_t<T, Se>>
 	{
-		static vm::addr_t cast(const se_t<T, Se>& addr, const char* loc)
+		static vm::addr_t cast(const se_t<T, Se>& addr,
+			u32 line,
+			u32 col,
+			const char* file,
+			const char* func)
 		{
-			return cast_impl<T>::cast(addr, loc);
-		}
-
-		static vm::addr_t cast(const se_t<T, Se>& addr)
-		{
-			return cast_impl<T>::cast(addr);
+			return cast_impl<T>::cast(addr, line, col, file, func);
 		}
 	};
 
 	template<typename T>
-	vm::addr_t cast(const T& addr, const char* loc)
+	vm::addr_t cast(const T& addr,
+		u32 line = __builtin_LINE(),
+		u32 col = __builtin_COLUMN(),
+		const char* file = __builtin_FILE(),
+		const char* func = __builtin_FUNCTION())
 	{
-		return cast_impl<T>::cast(addr, loc);
-	}
-
-	template<typename T>
-	vm::addr_t cast(const T& addr)
-	{
-		return cast_impl<T>::cast(addr);
+		return cast_impl<T>::cast(addr, line, col, file, func);
 	}
 
 	// Convert specified PS3/PSV virtual memory address to a pointer for common access

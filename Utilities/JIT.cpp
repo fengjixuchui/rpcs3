@@ -1,16 +1,15 @@
-﻿#include "types.h"
+#include "util/types.hpp"
 #include "JIT.h"
 #include "StrFmt.h"
 #include "File.h"
 #include "util/logs.hpp"
 #include "mutex.h"
 #include "sysinfo.h"
-#include "VirtualMemory.h"
+#include "util/vm.hpp"
 #include <immintrin.h>
 #include <zlib.h>
 
 #ifdef __linux__
-#include <sys/mman.h>
 #define CAN_OVERCOMMIT
 #endif
 
@@ -22,11 +21,8 @@ static u8* get_jit_memory()
 	static void* const s_memory2 = []() -> void*
 	{
 		void* ptr = utils::memory_reserve(0x80000000);
-
-#ifdef CAN_OVERCOMMIT
 		utils::memory_commit(ptr, 0x80000000);
 		utils::memory_protect(ptr, 0x40000000, utils::protection::wx);
-#endif
 		return ptr;
 	}();
 
@@ -73,7 +69,7 @@ static u8* add_jit_memory(std::size_t size, uint align)
 		// Check the necessity to commit more memory
 		if (_new > olda) [[unlikely]]
 		{
-			newa = ::align(_new, 0x100000);
+			newa = ::align(_new, 0x200000);
 		}
 
 		ctr += _new - (ctr & 0xffff'ffff);
@@ -314,8 +310,8 @@ struct MemoryManager1 : llvm::RTDyldMemoryManager
 	// 256 MiB for code or data
 	static constexpr u64 c_max_size = 0x20000000 / 2;
 
-	// Allocation unit
-	static constexpr u64 c_page_size = 4096;
+	// Allocation unit (2M)
+	static constexpr u64 c_page_size = 2 * 1024 * 1024;
 
 	// Reserve 512 MiB
 	u8* const ptr = static_cast<u8*>(utils::memory_reserve(c_max_size * 2));
@@ -332,7 +328,7 @@ struct MemoryManager1 : llvm::RTDyldMemoryManager
 
 	[[noreturn]] static void null()
 	{
-		fmt::throw_exception("Null function" HERE);
+		fmt::throw_exception("Null function");
 	}
 
 	llvm::JITSymbol findSymbol(const std::string& name) override
@@ -347,7 +343,7 @@ struct MemoryManager1 : llvm::RTDyldMemoryManager
 		return {addr, llvm::JITSymbolFlags::Exported};
 	}
 
-	u8* allocate(u64& oldp, std::uintptr_t size, uint align, utils::protection prot)
+	u8* allocate(u64& oldp, uptr size, uint align, utils::protection prot)
 	{
 		if (align > c_page_size)
 		{
@@ -378,12 +374,12 @@ struct MemoryManager1 : llvm::RTDyldMemoryManager
 		return this->ptr + olda;
 	}
 
-	u8* allocateCodeSection(std::uintptr_t size, uint align, uint sec_id, llvm::StringRef sec_name) override
+	u8* allocateCodeSection(uptr size, uint align, uint sec_id, llvm::StringRef sec_name) override
 	{
 		return allocate(code_ptr, size, align, utils::protection::wx);
 	}
 
-	u8* allocateDataSection(std::uintptr_t size, uint align, uint sec_id, llvm::StringRef sec_name, bool is_ro) override
+	u8* allocateDataSection(uptr size, uint align, uint sec_id, llvm::StringRef sec_name, bool is_ro) override
 	{
 		return allocate(data_ptr, size, align, utils::protection::rw);
 	}
@@ -411,12 +407,12 @@ struct MemoryManager2 : llvm::RTDyldMemoryManager
 	{
 	}
 
-	u8* allocateCodeSection(std::uintptr_t size, uint align, uint sec_id, llvm::StringRef sec_name) override
+	u8* allocateCodeSection(uptr size, uint align, uint sec_id, llvm::StringRef sec_name) override
 	{
 		return jit_runtime::alloc(size, align, true);
 	}
 
-	u8* allocateDataSection(std::uintptr_t size, uint align, uint sec_id, llvm::StringRef sec_name, bool is_ro) override
+	u8* allocateDataSection(uptr size, uint align, uint sec_id, llvm::StringRef sec_name, bool is_ro) override
 	{
 		return jit_runtime::alloc(size, align, false);
 	}
@@ -456,7 +452,7 @@ public:
 		name.append(".gz");
 
 		z_stream zs{};
-		uLong zsz = compressBound(::narrow<u32>(obj.getBufferSize(), HERE)) + 256;
+		uLong zsz = compressBound(::narrow<u32>(obj.getBufferSize())) + 256;
 		auto zbuf = std::make_unique<uchar[]>(zsz);
 #ifndef _MSC_VER
 #pragma GCC diagnostic push

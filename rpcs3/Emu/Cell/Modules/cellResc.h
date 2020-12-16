@@ -1,6 +1,4 @@
-﻿#pragma once
-
-#include "Utilities/BEType.h"
+#pragma once
 
 enum CellRescError : u32
 {

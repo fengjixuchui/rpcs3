@@ -1,10 +1,12 @@
-﻿#pragma once
+#pragma once
 
 #ifdef LLVM_AVAILABLE
 
 #include "Emu/CPU/CPUTranslator.h"
 #include "PPUOpcodes.h"
 #include "PPUAnalyser.h"
+
+#include "util/types.hpp"
 
 class PPUTranslator final : public cpu_translator
 {

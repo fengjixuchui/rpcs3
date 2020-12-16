@@ -1,5 +1,6 @@
-﻿#include "stdafx.h"
+#include "stdafx.h"
 #include "overlay_trophy_notification.h"
+#include "Emu/Cell/ErrorCodes.h"
 #include "Emu/RSX/RSXThread.h"
 
 namespace rsx

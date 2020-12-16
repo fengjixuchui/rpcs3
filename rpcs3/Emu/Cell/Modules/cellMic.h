@@ -1,6 +1,5 @@
-﻿#pragma once
+#pragma once
 
-#include "Utilities/BEType.h"
 #include "Utilities/Thread.h"
 
 #include "3rdparty/OpenAL/include/alext.h"
@@ -226,7 +225,7 @@ public:
 
 	void write_bytes(const u8* buf, const u32 size)
 	{
-		ASSERT(size <= S);
+		ensure(size <= S);
 
 		if (u32 over_size = m_used + size; over_size > S)
 		{

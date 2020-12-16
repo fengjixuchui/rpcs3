@@ -1,4 +1,4 @@
-﻿#include "log_frame.h"
+#include "log_frame.h"
 #include "qt_utils.h"
 #include "gui_settings.h"
 
@@ -404,10 +404,6 @@ void log_frame::LoadSettings()
 
 void log_frame::RepaintTextColors()
 {
-	// Backup old colors
-	QColor old_color_stack{ m_color_stack };
-	QList<QColor> old_color{ m_color };
-
 	// Get text color. Do this once to prevent possible slowdown
 	m_color.clear();
 	m_color.append(gui::utils::get_label_color("log_level_always"));

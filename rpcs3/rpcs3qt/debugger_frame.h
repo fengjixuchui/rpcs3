@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 
 #include "stdafx.h"
 
@@ -43,7 +43,7 @@ class debugger_frame : public custom_dock_widget
 	u64 m_threads_created = 0;
 	u64 m_threads_deleted = 0;
 	u32 m_last_pc = -1;
-	u32 m_last_stat = 0;
+	std::vector<char> m_last_query_state;
 	u32 m_last_step_over_breakpoint = -1;
 	bool m_no_thread_selected = true;
 
@@ -66,7 +66,6 @@ public:
 	void UpdateUI();
 	void UpdateUnitList();
 
-	u32 GetPc() const;
 	void DoUpdate();
 	void WritePanels();
 	void EnableButtons(bool enable);

@@ -1,8 +1,7 @@
 #pragma once
 
-#include "types.h"
+#include "util/types.hpp"
 #include "util/atomic.hpp"
-#include <shared_mutex>
 
 // Lightweight condition variable
 class cond_variable

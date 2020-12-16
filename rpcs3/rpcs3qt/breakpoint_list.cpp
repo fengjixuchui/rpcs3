@@ -1,4 +1,4 @@
-﻿#include "breakpoint_list.h"
+#include "breakpoint_list.h"
 #include "breakpoint_handler.h"
 
 #include "Emu/CPU/CPUDisAsm.h"
@@ -96,7 +96,7 @@ void breakpoint_list::HandleBreakpointRequest(u32 loc)
 	{
 		const auto cpu = this->cpu.lock();
 
-		if (cpu->id_type() == 1 && vm::check_addr(loc, 1, vm::page_allocated | vm::page_executable))
+		if (cpu->id_type() == 1 && vm::check_addr(loc, vm::page_allocated | vm::page_executable))
 		{
 			AddBreakpoint(loc);
 		}

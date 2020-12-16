@@ -1,9 +1,9 @@
-﻿#pragma once
+#pragma once
 
 #include <QDialog>
 #include <QTreeWidget>
 
-#include "Utilities/types.h"
+#include "util/types.hpp"
 
 class kernel_explorer : public QDialog
 {
@@ -21,6 +21,7 @@ class kernel_explorer : public QDialog
 		spu_thread_groups,
 		rsx_contexts,
 		file_descriptors,
+		process_info,
 	};
 
 public:

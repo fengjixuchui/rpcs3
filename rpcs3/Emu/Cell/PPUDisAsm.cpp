@@ -1,8 +1,8 @@
-﻿#include "stdafx.h"
+#include "stdafx.h"
 #include "PPUDisAsm.h"
 #include "PPUFunction.h"
 
-constexpr ppu_decoder<PPUDisAsm> s_ppu_disasm;
+const ppu_decoder<PPUDisAsm> s_ppu_disasm;
 
 u32 PPUDisAsm::disasm(u32 pc)
 {
@@ -69,7 +69,7 @@ constexpr std::pair<const char*, char> get_BC_info(u32 bo, u32 bi)
 		case 0x1: info.first = "ble"; break;
 		case 0x2: info.first = "bne"; break;
 		case 0x3: info.first = "bns"; break;
-		default: ASSUME(0); break;
+		default: fmt::throw_exception("Unreachable");
 		}
 		break;
 	}
@@ -82,7 +82,7 @@ constexpr std::pair<const char*, char> get_BC_info(u32 bo, u32 bi)
 		case 0x1: info.first = "ble"; break;
 		case 0x2: info.first = "bne"; break;
 		case 0x3: info.first = "bns"; break;
-		default: ASSUME(0); break;
+		default: fmt::throw_exception("Unreachable");
 		}
 		break;
 	}
@@ -95,7 +95,7 @@ constexpr std::pair<const char*, char> get_BC_info(u32 bo, u32 bi)
 		case 0x1: info.first = "ble"; break;
 		case 0x2: info.first = "bne"; break;
 		case 0x3: info.first = "bns"; break;
-		default: ASSUME(0); break;
+		default: fmt::throw_exception("Unreachable");
 		}
 		break;
 	}
@@ -107,7 +107,7 @@ constexpr std::pair<const char*, char> get_BC_info(u32 bo, u32 bi)
 		case 0x1: info.first = "bgt"; break;
 		case 0x2: info.first = "beq"; break;
 		case 0x3: info.first = "bso"; break;
-		default: ASSUME(0); break;
+		default: fmt::throw_exception("Unreachable");
 		}
 		break;
 	}
@@ -120,7 +120,7 @@ constexpr std::pair<const char*, char> get_BC_info(u32 bo, u32 bi)
 		case 0x1: info.first = "bgt"; break;
 		case 0x2: info.first = "beq"; break;
 		case 0x3: info.first = "bso"; break;
-		default: ASSUME(0); break;
+		default: fmt::throw_exception("Unreachable");
 		}
 		break;
 	}
@@ -133,7 +133,7 @@ constexpr std::pair<const char*, char> get_BC_info(u32 bo, u32 bi)
 		case 0x1: info.first = "bgt"; break;
 		case 0x2: info.first = "beq"; break;
 		case 0x3: info.first = "bso"; break;
-		default: ASSUME(0); break;
+		default: fmt::throw_exception("Unreachable");
 		}
 		break;
 	}
@@ -2346,12 +2346,12 @@ extern std::vector<std::string> g_ppu_function_names;
 
 void PPUDisAsm::UNK(ppu_opcode_t op)
 {
-	if (op.opcode == dump_pc && ppu_function_manager::addr)
+	if (ppu_function_manager::addr)
 	{
 		// HLE function index
 		const u32 index = (dump_pc - ppu_function_manager::addr) / 8;
 
-		if (index < ppu_function_manager::get().size())
+		if (dump_pc % 8 == 4 && index < ppu_function_manager::get().size())
 		{
 			Write(fmt::format("Function : %s (index %u)", index < g_ppu_function_names.size() ? g_ppu_function_names[index].c_str() : "?", index));
 			return;

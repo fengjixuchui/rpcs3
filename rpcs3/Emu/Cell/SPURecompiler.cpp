@@ -1,4 +1,4 @@
-﻿#include "stdafx.h"
+#include "stdafx.h"
 #include "SPURecompiler.h"
 
 #include "Emu/System.h"
@@ -18,16 +18,18 @@
 #include <mutex>
 #include <thread>
 
+#include "util/v128.hpp"
+
 extern atomic_t<const char*> g_progr;
 extern atomic_t<u32> g_progr_ptotal;
 extern atomic_t<u32> g_progr_pdone;
 
-constexpr spu_decoder<spu_itype> s_spu_itype;
-constexpr spu_decoder<spu_iname> s_spu_iname;
-constexpr spu_decoder<spu_iflag> s_spu_iflag;
+const spu_decoder<spu_itype> s_spu_itype;
+const spu_decoder<spu_iname> s_spu_iname;
+const spu_decoder<spu_iflag> s_spu_iflag;
 
-constexpr spu_decoder<spu_interpreter_precise> g_spu_interpreter_precise;
-constexpr spu_decoder<spu_interpreter_fast> g_spu_interpreter_fast;
+extern const spu_decoder<spu_interpreter_precise> g_spu_interpreter_precise{};
+extern const spu_decoder<spu_interpreter_fast> g_spu_interpreter_fast;
 
 extern u64 get_timebased_time();
 
@@ -135,7 +137,7 @@ DECLARE(spu_runtime::tr_all) = []
 	*raw++ = 0x48;
 	*raw++ = 0x8d;
 	*raw++ = 0x15;
-	const s32 r32 = ::narrow<s32>(reinterpret_cast<u64>(g_dispatcher) - reinterpret_cast<u64>(raw) - 4, HERE);
+	const s32 r32 = ::narrow<s32>(reinterpret_cast<u64>(g_dispatcher) - reinterpret_cast<u64>(raw) - 4);
 	std::memcpy(raw, &r32, 4);
 	raw += 4;
 
@@ -430,6 +432,9 @@ void spu_cache::initialize()
 
 	named_thread_group workers("SPU Worker ", worker_count, [&]() -> uint
 	{
+		// Set low priority
+		thread_ctrl::set_native_priority(-1);
+
 		// Initialize compiler instances for parallel compilation
 		std::unique_ptr<spu_recompiler_base> compiler;
 
@@ -708,7 +713,7 @@ spu_function_t spu_runtime::rebuild_ubertrampoline(u32 id_inst)
 		// Write jump instruction with rel32 immediate
 		auto make_jump = [&](u8 op, auto target)
 		{
-			verify("Asm overflow" HERE), raw + 8 <= wxptr + size0 * 22 + 16;
+			ensure(raw + 8 <= wxptr + size0 * 22 + 16);
 
 			// Fallback to dispatch if no target
 			const u64 taddr = target ? reinterpret_cast<u64>(target) : reinterpret_cast<u64>(tr_dispatch);
@@ -716,13 +721,13 @@ spu_function_t spu_runtime::rebuild_ubertrampoline(u32 id_inst)
 			// Compute the distance
 			const s64 rel = taddr - reinterpret_cast<u64>(raw) - (op != 0xe9 ? 6 : 5);
 
-			verify(HERE), rel >= INT32_MIN, rel <= INT32_MAX;
+			ensure(rel >= INT32_MIN && rel <= INT32_MAX);
 
 			if (op != 0xe9)
 			{
 				// First jcc byte
 				*raw++ = 0x0f;
-				verify(HERE), (op >> 4) == 0x8;
+				ensure((op >> 4) == 0x8);
 			}
 
 			*raw++ = op;
@@ -757,7 +762,7 @@ spu_function_t spu_runtime::rebuild_ubertrampoline(u32 id_inst)
 			u32 size2 = w.size - size1;
 			std::advance(it2, w.size / 2);
 
-			while (verify("spu_runtime::work::level overflow" HERE, w.level != 0xffff))
+			while (ensure(w.level < UINT16_MAX))
 			{
 				it = it2;
 				size1 = w.size - size2;
@@ -812,7 +817,7 @@ spu_function_t spu_runtime::rebuild_ubertrampoline(u32 id_inst)
 			if (w.rel32)
 			{
 				// Patch rel32 linking it to the current location if necessary
-				const s32 r32 = ::narrow<s32>(raw - w.rel32, HERE);
+				const s32 r32 = ::narrow<s32>(raw - w.rel32);
 				std::memcpy(w.rel32 - 4, &r32, 4);
 			}
 
@@ -844,7 +849,7 @@ spu_function_t spu_runtime::rebuild_ubertrampoline(u32 id_inst)
 					break;
 				}
 
-				verify(HERE), it != w.beg;
+				ensure(it != w.beg);
 				size1--;
 				size2++;
 			}
@@ -857,7 +862,7 @@ spu_function_t spu_runtime::rebuild_ubertrampoline(u32 id_inst)
 			}
 
 			// Emit 32-bit comparison
-			verify("Asm overflow" HERE), raw + 12 <= wxptr + size0 * 22 + 16;
+			ensure(raw + 12 <= wxptr + size0 * 22 + 16); // "Asm overflow"
 
 			if (w.from != w.level)
 			{
@@ -1512,7 +1517,7 @@ spu_program spu_recompiler_base::analyse(const be_t<u32>* ls, u32 entry_point)
 							jt_abs.clear();
 						}
 
-						verify(HERE), jt_abs.size() != jt_rel.size();
+						ensure(jt_abs.size() != jt_rel.size());
 					}
 
 					if (jt_abs.size() >= jt_rel.size())
@@ -1939,7 +1944,7 @@ spu_program spu_recompiler_base::analyse(const be_t<u32>* ls, u32 entry_point)
 		}
 		else if (u32& raw_val = result.data[new_size])
 		{
-			verify(HERE), raw_val == std::bit_cast<u32, be_t<u32>>(data);
+			ensure(raw_val == std::bit_cast<u32, be_t<u32>>(data));
 		}
 		else
 		{
@@ -3428,7 +3433,7 @@ class spu_llvm_recompiler : public spu_recompiler_base, public cpu_translator
 		else if (!callee)
 		{
 			// Create branch patchpoint if chunk == nullptr
-			verify(HERE), m_finfo, !m_finfo->fn || m_function == m_finfo->chunk;
+			ensure(m_finfo && (!m_finfo->fn || m_function == m_finfo->chunk));
 
 			// Register under a unique linkable name
 			const std::string ppname = fmt::format("%s-pp-%u", m_hash, m_pp_id++);
@@ -3448,7 +3453,7 @@ class spu_llvm_recompiler : public spu_recompiler_base, public cpu_translator
 			base_pc = m_ir->getInt32(0);
 		}
 
-		verify(HERE), callee;
+		ensure(callee);
 		auto call = m_ir->CreateCall(callee, {m_thread, m_lsptr, base_pc ? base_pc : m_base_pc});
 		auto func = m_finfo ? m_finfo->chunk : llvm::dyn_cast<llvm::Function>(callee.getCallee());
 		call->setCallingConv(func->getCallingConv());
@@ -3484,7 +3489,7 @@ class spu_llvm_recompiler : public spu_recompiler_base, public cpu_translator
 			r3 = get_reg_fixed<u32[4]>(3).value;
 		}
 
-		const auto _call = m_ir->CreateCall(verify(HERE, fn), {m_thread, m_lsptr, m_base_pc, sp, r3});
+		const auto _call = m_ir->CreateCall(ensure(fn), {m_thread, m_lsptr, m_base_pc, sp, r3});
 
 		_call->setCallingConv(fn->getCallingConv());
 
@@ -3590,7 +3595,7 @@ class spu_llvm_recompiler : public spu_recompiler_base, public cpu_translator
 
 			if (absolute)
 			{
-				verify(HERE), !m_finfo->fn;
+				ensure(!m_finfo->fn);
 
 				const auto next = llvm::BasicBlock::Create(m_context, "", m_function);
 				const auto fail = llvm::BasicBlock::Create(m_context, "", m_function);
@@ -3632,7 +3637,7 @@ class spu_llvm_recompiler : public spu_recompiler_base, public cpu_translator
 
 			if (absolute)
 			{
-				verify(HERE), !m_finfo->fn;
+				ensure(!m_finfo->fn);
 
 				m_ir->CreateStore(m_ir->getInt32(target), spu_ptr<u32>(&spu_thread::pc), true);
 			}
@@ -3646,7 +3651,7 @@ class spu_llvm_recompiler : public spu_recompiler_base, public cpu_translator
 			return result;
 		}
 
-		verify(HERE), !absolute;
+		ensure(!absolute);
 
 		auto& result = m_blocks[target].block;
 
@@ -3713,7 +3718,7 @@ class spu_llvm_recompiler : public spu_recompiler_base, public cpu_translator
 		case s_reg_mfc_size:
 			return get_type<u16>();
 		default:
-			fmt::throw_exception("get_reg_type(%u): invalid register index" HERE, index);
+			fmt::throw_exception("get_reg_type(%u): invalid register index", index);
 		}
 	}
 
@@ -3731,7 +3736,7 @@ class spu_llvm_recompiler : public spu_recompiler_base, public cpu_translator
 		case s_reg_mfc_tag: return ::offset32(&spu_thread::ch_mfc_cmd, &spu_mfc_cmd::tag);
 		case s_reg_mfc_size: return ::offset32(&spu_thread::ch_mfc_cmd, &spu_mfc_cmd::size);
 		default:
-			fmt::throw_exception("get_reg_offset(%u): invalid register index" HERE, index);
+			fmt::throw_exception("get_reg_offset(%u): invalid register index", index);
 		}
 	}
 
@@ -3790,7 +3795,7 @@ class spu_llvm_recompiler : public spu_recompiler_base, public cpu_translator
 
 	llvm::Value* double_to_xfloat(llvm::Value* val)
 	{
-		verify("double_to_xfloat" HERE), val, val->getType() == get_type<f64[4]>();
+		ensure(val && val->getType() == get_type<f64[4]>());
 
 		const auto d = double_as_uint64(val);
 		const auto s = m_ir->CreateAnd(m_ir->CreateLShr(d, 32), 0x80000000);
@@ -3801,7 +3806,7 @@ class spu_llvm_recompiler : public spu_recompiler_base, public cpu_translator
 
 	llvm::Value* xfloat_to_double(llvm::Value* val)
 	{
-		verify("xfloat_to_double" HERE), val, val->getType() == get_type<u32[4]>();
+		ensure(val && val->getType() == get_type<u32[4]>());
 
 		const auto x = m_ir->CreateZExt(val, get_type<u64[4]>());
 		const auto s = m_ir->CreateShl(m_ir->CreateAnd(x, 0x80000000), 32);
@@ -3815,7 +3820,7 @@ class spu_llvm_recompiler : public spu_recompiler_base, public cpu_translator
 	// Clamp double values to ±Smax, flush values smaller than ±Smin to positive zero
 	llvm::Value* xfloat_in_double(llvm::Value* val)
 	{
-		verify("xfloat_in_double" HERE), val, val->getType() == get_type<f64[4]>();
+		ensure(val && val->getType() == get_type<f64[4]>());
 
 		const auto smax = uint64_as_double(splat<u64[4]>(0x47ffffffe0000000).eval(m_ir));
 		const auto smin = uint64_as_double(splat<u64[4]>(0x3810000000000000).eval(m_ir));
@@ -4002,7 +4007,7 @@ class spu_llvm_recompiler : public spu_recompiler_base, public cpu_translator
 		llvm::StoreInst* dummy{};
 
 		// Check
-		verify(HERE), !m_block || m_regmod[m_pos / 4] == index;
+		ensure(!m_block || m_regmod[m_pos / 4] == index);
 
 		// Test for special case
 		const bool is_xfloat = value->getType() == get_type<f64[4]>();
@@ -4562,7 +4567,7 @@ public:
 
 										m_ir->SetInsertPoint(cblock);
 
-										verify(HERE), bfound->second.block_end->getTerminator();
+										ensure(bfound->second.block_end->getTerminator());
 									}
 
 									_phi->addIncoming(value, bfound->second.block_end);
@@ -4668,7 +4673,7 @@ public:
 					m_ir->CreateBr(add_block(target));
 				}
 
-				verify(HERE), m_block->block_end;
+				ensure(m_block->block_end);
 			}
 		}
 
@@ -4781,7 +4786,7 @@ public:
 				fs::file(m_spurt->get_cache_path() + "spu-ir.log", fs::write + fs::append).write(log);
 			}
 
-			fmt::raw_error("Compilation failed");
+			fmt::throw_exception("Compilation failed");
 		}
 
 		if (g_cfg.core.spu_debug)
@@ -4836,7 +4841,7 @@ public:
 			// Execute interpreter instruction
 			const u32 op = *reinterpret_cast<const be_t<u32>*>(_spu->_ptr<u8>(0) + _spu->pc);
 			if (!g_spu_interpreter_fast.decode(op)(*_spu, {op}))
-				spu_log.fatal("Bad instruction" HERE);
+				spu_log.fatal("Bad instruction");
 
 			// Swap state
 			for (u32 i = 0; i < s_gpr.size(); ++i)
@@ -5211,7 +5216,7 @@ public:
 				fs::file(m_spurt->get_cache_path() + "spu-ir.log", fs::write + fs::append).write(log);
 			}
 
-			fmt::raw_error("Compilation failed");
+			fmt::throw_exception("Compilation failed");
 		}
 
 		if (g_cfg.core.spu_debug)
@@ -5280,7 +5285,7 @@ public:
 
 	static void exec_unk(spu_thread* _spu, u32 op)
 	{
-		fmt::throw_exception("Unknown/Illegal instruction (0x%08x)" HERE, op);
+		fmt::throw_exception("Unknown/Illegal instruction (0x%08x)", op);
 	}
 
 	void UNK(spu_opcode_t op_unk)
@@ -6949,19 +6954,19 @@ public:
 
 	void ANDI(spu_opcode_t op)
 	{
-		if (!m_interp_magn && !op.si10) return set_vr(op.rt, get_vr(op.ra));
+		if (!m_interp_magn && op.si10 == -1) return set_vr(op.rt, get_vr(op.ra));
 		set_vr(op.rt, get_vr<s32[4]>(op.ra) & get_imm<s32[4]>(op.si10));
 	}
 
 	void ANDHI(spu_opcode_t op)
 	{
-		if (!m_interp_magn && !op.si10) return set_vr(op.rt, get_vr(op.ra));
+		if (!m_interp_magn && op.si10 == -1) return set_vr(op.rt, get_vr(op.ra));
 		set_vr(op.rt, get_vr<s16[8]>(op.ra) & get_imm<s16[8]>(op.si10));
 	}
 
 	void ANDBI(spu_opcode_t op)
 	{
-		if (!m_interp_magn && !op.si10) return set_vr(op.rt, get_vr(op.ra));
+		if (!m_interp_magn && static_cast<s8>(op.si10) == -1) return set_vr(op.rt, get_vr(op.ra));
 		set_vr(op.rt, get_vr<s8[16]>(op.ra) & get_imm<s8[16]>(op.si10));
 	}
 
@@ -8799,7 +8804,7 @@ std::unique_ptr<spu_recompiler_base> spu_recompiler_base::make_llvm_recompiler(u
 	return std::make_unique<spu_llvm_recompiler>(magn);
 }
 
-constexpr spu_decoder<spu_llvm_recompiler> g_spu_llvm_decoder;
+const spu_decoder<spu_llvm_recompiler> g_spu_llvm_decoder;
 
 decltype(&spu_llvm_recompiler::UNK) spu_llvm_recompiler::decode(u32 op)
 {
@@ -8843,6 +8848,11 @@ struct spu_llvm_worker
 			if (!prog)
 			{
 				continue;
+			}
+
+			if (!prog->second)
+			{
+				break;
 			}
 
 			const auto& func = *prog->second;
@@ -8984,7 +8994,7 @@ struct spu_llvm
 			{
 				// Interrupt profiler thread and put it to sleep
 				static_cast<void>(prof_mutex.reset());
-				registered.wait();
+				atomic_wait::list(registered).wait(); // TODO
 				continue;
 			}
 
@@ -9014,6 +9024,11 @@ struct spu_llvm
 
 			// Push the workload
 			(workers.begin() + (worker_index++ % worker_count))->registered.push(reinterpret_cast<u64>(_old), &func);
+		}
+
+		for (u32 i = 0; i < worker_count; i++)
+		{
+			(workers.begin() + i)->registered.push(0, nullptr);
 		}
 	}
 

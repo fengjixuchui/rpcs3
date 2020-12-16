@@ -1,10 +1,8 @@
-﻿#pragma once
+#pragma once
 
-#include "Emu/Memory/vm.h"
 #include "surface_utils.h"
-#include "../GCM.h"
+#include "../gcm_enums.h"
 #include "../rsx_utils.h"
-#include "Utilities/span.h"
 #include <list>
 
 namespace rsx
@@ -148,7 +146,7 @@ namespace rsx
 					}
 				}
 
-				verify(HERE), region.target == Traits::get(sink);
+				ensure(region.target == Traits::get(sink));
 				orphaned_surfaces.push_back(region.target);
 				data[new_address] = std::move(sink);
 			};
@@ -171,7 +169,7 @@ namespace rsx
 			}
 
 			// One-time data validity test
-			verify(HERE), prev_surface;
+			ensure(prev_surface);
 			if (prev_surface->read_barrier(cmd); !prev_surface->test())
 			{
 				return;
@@ -362,7 +360,7 @@ namespace rsx
 					if (ignore) continue;
 
 					this_address = surface->base_addr;
-					verify(HERE), this_address;
+					ensure(this_address);
 				}
 
 				const auto parent_region = surface->get_normalized_memory_area();
@@ -407,7 +405,9 @@ namespace rsx
 					auto &storage = surface->is_depth_surface() ? m_depth_stencil_storage : m_render_targets_storage;
 					auto &object = storage[e.first];
 
-					verify(HERE), !src_offset.x, !src_offset.y, object;
+					ensure(!src_offset.x);
+					ensure(!src_offset.y);
+					ensure(object);
 					if (!surface->old_contents.empty()) [[unlikely]]
 					{
 						surface->read_barrier(cmd);
@@ -533,7 +533,7 @@ namespace rsx
 
 			if (!new_surface)
 			{
-				verify(HERE), store;
+				ensure(store);
 				new_surface_storage = Traits::create_new_surface(address, format, width, height, pitch, antialias, std::forward<Args>(extra_params)...);
 				new_surface = Traits::get(new_surface_storage);
 				allocate_rsx_memory(new_surface);
@@ -592,7 +592,8 @@ namespace rsx
 				(*primary_storage)[address] = std::move(new_surface_storage);
 			}
 
-			verify(HERE), !old_surface_storage, new_surface->get_spp() == get_format_sample_count(antialias);
+			ensure(!old_surface_storage);
+			ensure(new_surface->get_spp() == get_format_sample_count(antialias));
 			return new_surface;
 		}
 
@@ -604,7 +605,7 @@ namespace rsx
 
 		void free_rsx_memory(surface_type surface)
 		{
-			verify("Surface memory double free" HERE), surface->has_refs();
+			ensure(surface->has_refs()); // "Surface memory double free"
 
 			if (const auto memory_size = surface->get_memory_range().length();
 				m_active_memory_used >= memory_size) [[likely]]
@@ -756,7 +757,7 @@ namespace rsx
 			if (_It != m_depth_stencil_storage.end())
 				return Traits::get(_It->second);
 
-			fmt::throw_exception("Unreachable" HERE);
+			fmt::throw_exception("Unreachable");
 		}
 
 		surface_type get_color_surface_at(u32 address)
@@ -795,8 +796,6 @@ namespace rsx
 				{
 					invalidate(It->second);
 					m_render_targets_storage.erase(It);
-
-					cache_tag = rsx::get_shared_tag();
 					return;
 				}
 			}
@@ -807,8 +806,6 @@ namespace rsx
 				{
 					invalidate(It->second);
 					m_depth_stencil_storage.erase(It);
-
-					cache_tag = rsx::get_shared_tag();
 					return;
 				}
 			}
@@ -978,7 +975,7 @@ namespace rsx
 			if (write_tag == cache_tag && m_skip_write_updates)
 			{
 				// Nothing to do
-				verify(HERE), !m_invalidate_on_write;
+				ensure(!m_invalidate_on_write);
 				return;
 			}
 
@@ -1032,11 +1029,6 @@ namespace rsx
 			}
 		}
 
-		void notify_memory_structure_changed()
-		{
-			cache_tag = rsx::get_shared_tag();
-		}
-
 		void invalidate_all()
 		{
 			// Unbind and invalidate all resources
@@ -1053,7 +1045,7 @@ namespace rsx
 			free_resource_list(m_render_targets_storage);
 			free_resource_list(m_depth_stencil_storage);
 
-			verify(HERE), m_active_memory_used == 0;
+			ensure(m_active_memory_used == 0);
 
 			m_bound_depth_stencil = std::make_pair(0, nullptr);
 			m_bound_render_targets_config = { 0, 0 };

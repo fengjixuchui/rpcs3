@@ -1,4 +1,4 @@
-﻿#include "stdafx.h"
+#include "stdafx.h"
 #include "cellCamera.h"
 
 #include "Emu/System.h"
@@ -434,7 +434,7 @@ error_code cellCameraOpenEx(s32 dev_num, vm::ptr<CellCameraInfoEx> info)
 
 	if (info->read_mode != CELL_CAMERA_READ_DIRECT && !info->buffer)
 	{
-		info->buffer = vm::cast(vm::alloc(vbuf_size, vm::memory_location_t::main));
+		info->buffer = vm::cast(vm::alloc(vbuf_size, vm::main));
 		info->bytesize = vbuf_size;
 	}
 
@@ -480,7 +480,7 @@ error_code cellCameraClose(s32 dev_num)
 		return CELL_CAMERA_ERROR_NOT_OPEN;
 	}
 
-	vm::dealloc(g_camera->info.buffer.addr(), vm::memory_location_t::main);
+	vm::dealloc(g_camera->info.buffer.addr(), vm::main);
 	g_camera->is_open = false;
 
 	return CELL_OK;
@@ -639,7 +639,7 @@ s32 cellCameraIsOpen(s32 dev_num)
 
 	std::lock_guard lock(g_camera->mutex);
 
-	return g_camera->is_open;
+	return g_camera->is_open.load();
 }
 
 s32 cellCameraIsStarted(s32 dev_num)
@@ -665,7 +665,7 @@ s32 cellCameraIsStarted(s32 dev_num)
 
 	std::lock_guard lock(g_camera->mutex);
 
-	return g_camera->is_streaming;
+	return g_camera->is_streaming.load();
 }
 
 error_code cellCameraGetAttribute(s32 dev_num, s32 attrib, vm::ptr<u32> arg1, vm::ptr<u32> arg2)

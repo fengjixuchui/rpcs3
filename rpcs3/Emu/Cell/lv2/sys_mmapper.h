@@ -1,12 +1,18 @@
-﻿#pragma once
+#pragma once
 
 #include "sys_sync.h"
 
 #include "Emu/Memory/vm_ptr.h"
+#include "Emu/Cell/ErrorCodes.h"
 
 #include <vector>
 
 struct lv2_memory_container;
+
+namespace utils
+{
+	class shm;
+}
 
 struct lv2_memory : lv2_obj
 {

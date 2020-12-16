@@ -2,7 +2,6 @@
 
 #include "vm.h"
 #include "vm_locking.h"
-#include "Utilities/cond.h"
 #include "util/atomic.hpp"
 #include <functional>
 
@@ -126,7 +125,7 @@ namespace vm
 					_xend();
 #endif
 					if constexpr (Ack)
-						res.notify_all();
+						res.notify_all(-128);
 					return;
 				}
 				else
@@ -140,7 +139,7 @@ namespace vm
 						_xend();
 #endif
 						if constexpr (Ack)
-							res.notify_all();
+							res.notify_all(-128);
 						return result;
 					}
 					else
@@ -160,12 +159,6 @@ namespace vm
 			__asm__ volatile ("mov %%eax, %0;" : "=r" (status) :: "memory");
 #endif
 			stamp1 = __rdtsc();
-
-			// Touch memory if transaction failed with status 0
-			if (!status)
-			{
-				reinterpret_cast<atomic_t<u8>*>(sptr)->fetch_add(0);
-			}
 
 			// Stage 2: try to lock reservation first
 			_old = res.fetch_add(1);
@@ -201,7 +194,7 @@ namespace vm
 #endif
 					res += 127;
 					if (Ack)
-						res.notify_all();
+						res.notify_all(-128);
 					return;
 				}
 				else
@@ -215,7 +208,7 @@ namespace vm
 #endif
 						res += 127;
 						if (Ack)
-							res.notify_all();
+							res.notify_all(-128);
 						return result;
 					}
 					else
@@ -250,7 +243,7 @@ namespace vm
 				});
 
 				if constexpr (Ack)
-					res.notify_all();
+					res.notify_all(-128);
 				return;
 			}
 			else
@@ -270,7 +263,7 @@ namespace vm
 				});
 
 				if (Ack && result)
-					res.notify_all();
+					res.notify_all(-128);
 				return result;
 			}
 		}
@@ -287,7 +280,7 @@ namespace vm
 			}
 
 			if constexpr (Ack)
-				res.notify_all();
+				res.notify_all(-128);
 			return;
 		}
 		else
@@ -307,7 +300,7 @@ namespace vm
 			}
 
 			if (Ack && result)
-				res.notify_all();
+				res.notify_all(-128);
 			return result;
 		}
 	}
@@ -399,7 +392,7 @@ namespace vm
 
 			if constexpr (Ack)
 			{
-				res.notify_all();
+				res.notify_all(-128);
 			}
 		}
 		else
@@ -409,7 +402,7 @@ namespace vm
 
 			if constexpr (Ack)
 			{
-				res.notify_all();
+				res.notify_all(-128);
 			}
 
 			return result;

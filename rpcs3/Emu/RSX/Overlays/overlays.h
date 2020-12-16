@@ -1,15 +1,14 @@
-﻿#pragma once
+#pragma once
 #include "overlay_animation.h"
 #include "overlay_controls.h"
 
-#include "../../../Utilities/Thread.h"
-#include "Emu/Memory/vm.h"
 #include "Emu/IdManager.h"
 
+#include "Utilities/mutex.h"
 #include "Utilities/Timer.h"
 
 #include <list>
-#include <thread>
+#include <mutex>
 
 // Utils
 extern u64 get_system_time();

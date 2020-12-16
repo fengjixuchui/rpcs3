@@ -1,4 +1,4 @@
-﻿#include "stdafx.h"
+#include "stdafx.h"
 
 #include "GDB.h"
 #include "util/logs.hpp"
@@ -220,7 +220,7 @@ int gdb_thread::read(void* buf, int cnt)
 			}
 
 			GDB.error("Error during socket read.");
-			fmt::throw_exception("Error during socket read" HERE);
+			fmt::throw_exception("Error during socket read");
 		}
 		return result;
 	}
@@ -232,7 +232,7 @@ char gdb_thread::read_char()
 	char result;
 	int cnt = read(&result, 1);
 	if (!cnt) {
-		fmt::throw_exception("Tried to read char, but no data was available" HERE);
+		fmt::throw_exception("Tried to read char, but no data was available");
 	}
 	return result;
 }
@@ -261,7 +261,7 @@ bool gdb_thread::try_read_cmd(gdb_cmd& out_cmd)
 			c = read_char();
 		}
 		if (c != '$') {
-			fmt::throw_exception("Expected start of packet character '$', got '%c' instead" HERE, c);
+			fmt::throw_exception("Expected start of packet character '$', got '%c' instead", c);
 		}
 	}
 	//clear packet data
@@ -516,7 +516,7 @@ void gdb_thread::wait_with_interrupts()
 			}
 
 			GDB.error("Error during socket read.");
-			fmt::throw_exception("Error during socket read" HERE);
+			fmt::throw_exception("Error during socket read");
 		} else if (c == 0x03) {
 			paused = true;
 		}
@@ -641,7 +641,7 @@ bool gdb_thread::cmd_write_memory(gdb_cmd& cmd)
 	u32 len = hex_to_u32(cmd.data.substr(s + 1, s2 - s - 1));
 	const char* data_ptr = (cmd.data.c_str()) + s2 + 1;
 	for (u32 i = 0; i < len; ++i) {
-		if (vm::check_addr(addr + i, 1, vm::page_writable)) {
+		if (vm::check_addr(addr + i, vm::page_writable)) {
 			u8 val;
 			int res = sscanf_s(data_ptr, "%02hhX", &val);
 			if (!res) {

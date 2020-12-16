@@ -1,9 +1,8 @@
-﻿#pragma once
+#pragma once
 
 #include "gcm_enums.h"
-#include "rsx_decode.h"
 
-#include "Utilities/types.h"
+#include "util/types.hpp"
 #include "rsx_utils.h"
 
 namespace rsx

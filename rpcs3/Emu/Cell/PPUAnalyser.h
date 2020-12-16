@@ -3,9 +3,10 @@
 #include <string>
 #include <map>
 #include <set>
+#include "util/types.hpp"
+#include "util/endian.hpp"
 
 #include "Utilities/bit_set.h"
-#include "Utilities/BEType.h"
 #include "PPUOpcodes.h"
 
 // PPU Function Attributes
@@ -1244,13 +1245,13 @@ struct ppu_acontext
 
 				r.imin = (min + ~mask) & mask;
 				r.imax = max & mask;
-				verify("Impossible range" HERE), r.imin <= r.imax;
+				ensure(r.imin <= r.imax); // "Impossible range"
 			}
 			else
 			{
 				r.imin = min & mask;
 				r.imax = (max + ~mask) & mask;
-				verify("Impossible range" HERE), r.imin >= r.imax;
+				ensure(r.imin >= r.imax); // "Impossible range"
 			}
 
 			// Fix const values

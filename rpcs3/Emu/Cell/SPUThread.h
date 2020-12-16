@@ -1,18 +1,24 @@
-﻿#pragma once
+#pragma once
 
 #include "Emu/CPU/CPUThread.h"
 #include "Emu/Cell/SPUInterpreter.h"
 #include "Emu/Memory/vm.h"
 #include "MFC.h"
-#include "Utilities/BEType.h"
 
 #include <map>
+#include "util/v128.hpp"
+#include "util/to_endian.hpp"
 
 LOG_CHANNEL(spu_log, "SPU");
 
 struct lv2_event_queue;
 struct lv2_spu_group;
 struct lv2_int_tag;
+
+namespace utils
+{
+	class shm;
+}
 
 // JIT Block
 using spu_function_t = void(*)(spu_thread&, void*, u8*);
@@ -157,6 +163,8 @@ enum : u32
 	RAW_SPU_OFFSET      = 0x00100000,
 	RAW_SPU_LS_OFFSET   = 0x00000000,
 	RAW_SPU_PROB_OFFSET = 0x00040000,
+
+	SPU_FAKE_BASE_ADDR  = 0xE8000000,
 };
 
 struct spu_channel
@@ -561,7 +569,7 @@ public:
 			return this->_u32[3] >> 10 & 0x3;
 
 		default:
-			fmt::throw_exception("Unexpected slice value (%d)" HERE, slice);
+			fmt::throw_exception("Unexpected slice value (%d)", slice);
 		}
 	}
 
@@ -629,9 +637,9 @@ public:
 
 	static const u32 id_base = 0x02000000; // TODO (used to determine thread type)
 	static const u32 id_step = 1;
-	static const u32 id_count = 2048;
+	static const u32 id_count = (0xFFFC0000 - SPU_FAKE_BASE_ADDR) / SPU_LS_SIZE;
 
-	spu_thread(vm::addr_t ls, lv2_spu_group* group, u32 index, std::string_view name, u32 lv2_id, bool is_isolated = false, u32 option = 0);
+	spu_thread(lv2_spu_group* group, u32 index, std::string_view name, u32 lv2_id, bool is_isolated = false, u32 option = 0);
 
 	u32 pc = 0;
 
@@ -730,17 +738,17 @@ public:
 	atomic_t<u32> last_exit_status; // Value to be written in exit_status after checking group termination
 
 	const u32 index; // SPU index
+	std::shared_ptr<utils::shm> shm; // SPU memory
 	const std::add_pointer_t<u8> ls; // SPU LS pointer
 	const spu_type thread_type;
 private:
-	const u32 offset; // SPU LS offset
 	lv2_spu_group* const group; // SPU Thread Group (only safe to access in the spu thread itself)
 public:
 	const u32 option; // sys_spu_thread_initialize option
 	const u32 lv2_id; // The actual id that is used by syscalls
 
 	// Thread name
-	stx::atomic_cptr<std::string> spu_tname;
+	atomic_ptr<std::string> spu_tname;
 
 	std::unique_ptr<class spu_recompiler_base> jit; // Recompiler instance
 
@@ -764,6 +772,8 @@ public:
 	const char* current_func{}; // Current STOP or RDCH blocking function
 	u64 start_time{}; // Starting time of STOP or RDCH bloking function
 
+	atomic_t<u8> debugger_float_mode = 0;
+
 	void push_snr(u32 number, u32 value);
 	static void do_dma_transfer(spu_thread* _this, const spu_mfc_cmd& args, u8* ls);
 	bool do_dma_check(const spu_mfc_cmd& args);
@@ -778,6 +788,7 @@ public:
 	void set_events(u32 bits);
 	void set_interrupt_status(bool enable);
 	bool check_mfc_interrupts(u32 nex_pc);
+	bool is_exec_code(u32 addr) const; // Only a hint, do not rely on it other than debugging purposes
 	u32 get_ch_count(u32 ch);
 	s64 get_ch_value(u32 ch);
 	bool set_ch_value(u32 ch, u32 value);
@@ -792,7 +803,7 @@ public:
 	template<typename T>
 	to_be_t<T>* _ptr(u32 lsa) const
 	{
-		return reinterpret_cast<to_be_t<T>*>(ls + lsa);
+		return reinterpret_cast<to_be_t<T>*>(ls + (lsa % SPU_LS_SIZE));
 	}
 
 	// Convert specified SPU LS address to a reference of specified (possibly converted to BE) type
@@ -806,6 +817,10 @@ public:
 	{
 		return thread_type;
 	}
+
+	// Returns true if reservation existed but was just discovered to be lost
+	// It is safe to use on any address, even if not directly accessed by SPU (so it's slower)
+	bool reservation_check(u32 addr, const decltype(rdata)& data);
 
 	bool read_reg(const u32 addr, u32& value);
 	bool write_reg(const u32 addr, const u32 value);

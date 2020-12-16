@@ -1,4 +1,5 @@
-﻿#include "vfs_dialog_tab.h"
+#include "vfs_dialog_tab.h"
+#include "Utilities/Config.h"
 
 #include <QFileDialog>
 #include <QCoreApplication>

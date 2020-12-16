@@ -1,11 +1,13 @@
-﻿#include "stdafx.h"
+#include "stdafx.h"
 #include "SPUDisAsm.h"
 #include "SPUAnalyser.h"
 #include "SPUThread.h"
 
-constexpr spu_decoder<SPUDisAsm> s_spu_disasm;
-constexpr spu_decoder<spu_itype> s_spu_itype;
-constexpr spu_decoder<spu_iflag> s_spu_iflag;
+const spu_decoder<SPUDisAsm> s_spu_disasm;
+const spu_decoder<spu_itype> s_spu_itype;
+const spu_decoder<spu_iflag> s_spu_iflag;
+
+#include "util/v128.hpp"
 
 u32 SPUDisAsm::disasm(u32 pc)
 {
@@ -88,7 +90,7 @@ std::pair<bool, v128> SPUDisAsm::try_get_const_value(u32 reg, u32 pc) const
 					case spu_itype::CHD: size = 2; break;
 					case spu_itype::CWD: size = 4; break;
 					case spu_itype::CDD: size = 8; break;
-					default: ASSUME(0);
+					default: fmt::throw_exception("Unreachable");
 					}
 
 					const u32 index = (~op0.i7 & 0xf) / size;
@@ -100,7 +102,7 @@ std::pair<bool, v128> SPUDisAsm::try_get_const_value(u32 reg, u32 pc) const
 					case 2: res._u16[index] = 0x0203; break;
 					case 4: res._u32[index] = 0x00010203; break;
 					case 8: res._u64[index] = 0x0001020304050607ull; break;
-					default: ASSUME(0);
+					default: fmt::throw_exception("Unreachable");
 					}
 
 					return {true, res};
@@ -215,6 +217,12 @@ typename SPUDisAsm::insert_mask_info SPUDisAsm::try_get_insert_mask_info(v128 ma
 
 	if ((size | src_first | first) & (size - 1))
 	{
+		return {};
+	}
+
+	if (size == 16)
+	{
+		// 0x0, 0x1, 0x2, .. 0xE, 0xF is not allowed
 		return {};
 	}
 

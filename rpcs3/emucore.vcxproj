@@ -112,6 +112,7 @@
     <ClCompile Include="Emu\title.cpp" />
     <ClCompile Include="Emu\system_config.cpp" />
     <ClCompile Include="Emu\NP\fb_helpers.cpp" />
+    <ClCompile Include="Emu\NP\np_contexts.cpp" />
     <ClCompile Include="Emu\NP\np_handler.cpp" />
     <ClCompile Include="Emu\NP\signaling_handler.cpp" />
     <ClCompile Include="Emu\NP\np_structs_extra.cpp" />
@@ -129,9 +130,6 @@
     <ClCompile Include="util\cereal.cpp">
       <PrecompiledHeader>NotUsing</PrecompiledHeader>
     </ClCompile>
-    <ClCompile Include="util\shared_cptr.cpp">
-      <PrecompiledHeader>NotUsing</PrecompiledHeader>
-    </ClCompile>
     <ClCompile Include="util\fixed_typemap.cpp">
       <PrecompiledHeader>NotUsing</PrecompiledHeader>
     </ClCompile>
@@ -141,7 +139,9 @@
     <ClCompile Include="..\Utilities\cond.cpp">
       <PrecompiledHeader>NotUsing</PrecompiledHeader>
     </ClCompile>
-    <ClCompile Include="..\Utilities\dynamic_library.cpp" />
+    <ClCompile Include="util\dyn_lib.cpp">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
     <ClCompile Include="..\Utilities\JIT.cpp">
       <PrecompiledHeader>NotUsing</PrecompiledHeader>
     </ClCompile>
@@ -174,7 +174,7 @@
     </ClCompile>
     <ClCompile Include="..\Utilities\Thread.cpp" />
     <ClCompile Include="..\Utilities\version.cpp" />
-    <ClCompile Include="..\Utilities\VirtualMemory.cpp" />
+    <ClCompile Include="util\vm_native.cpp" />
     <ClCompile Include="Emu\Cell\lv2\sys_config.cpp" />
     <ClCompile Include="Crypto\md5.cpp">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release - LLVM|x64'">NotUsing</PrecompiledHeader>
@@ -519,7 +519,8 @@
     <ClInclude Include="Emu\system_config.h" />
     <ClInclude Include="Emu\system_config_types.h" />
     <ClInclude Include="util\atomic.hpp" />
-    <ClInclude Include="..\Utilities\BEType.h" />
+    <ClInclude Include="util\v128.hpp" />
+    <ClInclude Include="util\to_endian.hpp" />
     <ClInclude Include="..\Utilities\bin_patch.h" />
     <ClInclude Include="..\Utilities\BitField.h" />
     <ClInclude Include="..\Utilities\bit_set.h" />
@@ -527,7 +528,6 @@
     <ClInclude Include="..\Utilities\cond.h" />
     <ClInclude Include="..\Utilities\CRC.h" />
     <ClInclude Include="..\Utilities\date_time.h" />
-    <ClInclude Include="..\Utilities\dynamic_library.h" />
     <ClInclude Include="..\Utilities\geometry.h" />
     <ClInclude Include="..\Utilities\hash.h" />
     <ClInclude Include="..\Utilities\JIT.h" />
@@ -540,6 +540,7 @@
     <ClInclude Include="util\fixed_typemap.hpp" />
     <ClInclude Include="util\init_mutex.hpp" />
     <ClInclude Include="util\logs.hpp" />
+    <ClInclude Include="..\Utilities\dyn_lib.hpp" />
     <ClInclude Include="..\Utilities\File.h" />
     <ClInclude Include="..\Utilities\Config.h" />
     <ClInclude Include="..\Utilities\rXml.h" />
@@ -548,9 +549,10 @@
     <ClInclude Include="..\Utilities\sysinfo.h" />
     <ClInclude Include="..\Utilities\Thread.h" />
     <ClInclude Include="..\Utilities\Timer.h" />
-    <ClInclude Include="..\Utilities\types.h" />
+    <ClInclude Include="util\types.hpp" />
     <ClInclude Include="..\Utilities\version.h" />
-    <ClInclude Include="..\Utilities\VirtualMemory.h" />
+    <ClInclude Include="util\vm.hpp" />
+    <ClInclude Include="util\asm.hpp" />
     <ClInclude Include="Crypto\aes.h" />
     <ClInclude Include="Crypto\aesni.h" />
     <ClInclude Include="Crypto\ec.h" />
@@ -774,7 +776,7 @@
     <ClInclude Include="restore_new.h" />
     <ClInclude Include="rpcs3_version.h" />
     <ClInclude Include="stdafx.h" />
-    <ClInclude Include="util\shared_cptr.hpp" />
+    <ClInclude Include="util\shared_ptr.hpp" />
     <ClInclude Include="util\typeindices.hpp" />
     <ClInclude Include="util\yaml.hpp" />
   </ItemGroup>

@@ -1,4 +1,4 @@
-﻿// Qt5.10+ frontend implementation for rpcs3. Known to work on Windows, Linux, Mac
+// Qt5.10+ frontend implementation for rpcs3. Known to work on Windows, Linux, Mac
 // by Sacha Refshauge, Megamouse and flash-fire
 
 #include <iostream>
@@ -17,7 +17,7 @@
 #include "Utilities/sema.h"
 #ifdef _WIN32
 #include <windows.h>
-#include "Utilities/dynamic_library.h"
+#include "util/dyn_lib.hpp"
 DYNAMIC_IMPORT("ntdll.dll", NtQueryTimerResolution, NTSTATUS(PULONG MinimumResolution, PULONG MaximumResolution, PULONG CurrentResolution));
 DYNAMIC_IMPORT("ntdll.dll", NtSetTimerResolution, NTSTATUS(ULONG DesiredResolution, BOOLEAN SetResolution, PULONG CurrentResolution));
 #else
@@ -39,10 +39,13 @@ DYNAMIC_IMPORT("ntdll.dll", NtSetTimerResolution, NTSTATUS(ULONG DesiredResoluti
 
 #include "Utilities/sysinfo.h"
 #include "Utilities/Config.h"
+#include "Utilities/Thread.h"
 #include "rpcs3_version.h"
 #include "Emu/System.h"
 #include <thread>
 #include <charconv>
+
+#include "util/v128.hpp"
 
 inline std::string sstr(const QString& _in) { return _in.toStdString(); }
 
@@ -357,6 +360,17 @@ int main(int argc, char** argv)
 		return 1;
 	}
 
+#ifdef _WIN32
+	if (!SetProcessWorkingSetSize(GetCurrentProcess(), 0x80000000, 0xC0000000)) // 2-3 GiB
+	{
+		report_fatal_error("Not enough memory for RPCS3 process.");
+		return 2;
+	}
+#endif
+
+	// Initialize thread pool finalizer (on first use)
+	named_thread("", []{})();
+
 	std::unique_ptr<logs::listener> log_file;
 	{
 		// Check free space
@@ -412,8 +426,17 @@ int main(int argc, char** argv)
 	struct ::rlimit rlim;
 	rlim.rlim_cur = 4096;
 	rlim.rlim_max = 4096;
+#ifdef RLIMIT_NOFILE
 	if (::setrlimit(RLIMIT_NOFILE, &rlim) != 0)
-		std::fprintf(stderr, "Failed to set max open file limit (4096).");
+		std::fprintf(stderr, "Failed to set max open file limit (4096).\n");
+#endif
+
+	rlim.rlim_cur = 0x80000000;
+	rlim.rlim_max = 0x80000000;
+#ifdef RLIMIT_MEMLOCK
+	if (::setrlimit(RLIMIT_MEMLOCK, &rlim) != 0)
+		std::fprintf(stderr, "Failed to set RLIMIT_MEMLOCK size to 2 GiB. Try to update your system configuration.\n");
+#endif
 	// Work around crash on startup on KDE: https://bugs.kde.org/show_bug.cgi?id=401637
 	setenv( "KDE_DEBUG", "1", 0 );
 #endif

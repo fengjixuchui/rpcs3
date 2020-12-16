@@ -2,11 +2,12 @@
 
 /* For internal use. Don't include. */
 
-#include "types.h"
+#include "util/types.hpp"
 #include "util/atomic.hpp"
-#include "dynamic_library.h"
+#include "util/dyn_lib.hpp"
 
 #ifdef _WIN32
+#define NOMINMAX
 #include <Windows.h>
 #include <time.h>
 #elif __linux__
@@ -15,6 +16,7 @@
 #include <linux/futex.h>
 #include <sys/time.h>
 #include <unistd.h>
+#include <fcntl.h>
 #endif
 #include <algorithm>
 #include <ctime>

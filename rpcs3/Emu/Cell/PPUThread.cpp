@@ -1,5 +1,4 @@
 ﻿#include "stdafx.h"
-#include "Utilities/VirtualMemory.h"
 #include "Utilities/sysinfo.h"
 #include "Utilities/JIT.h"
 #include "Crypto/sha1.h"
@@ -12,6 +11,7 @@
 #include "PPUInterpreter.h"
 #include "PPUAnalyser.h"
 #include "PPUModule.h"
+#include "PPUDisAsm.h"
 #include "SPURecompiler.h"
 #include "lv2/sys_sync.h"
 #include "lv2/sys_prx.h"
@@ -64,7 +64,9 @@
 #include <thread>
 #include <cfenv>
 #include <cctype>
-#include <string>
+#include "util/asm.hpp"
+#include "util/vm.hpp"
+#include "util/v128.hpp"
 
 const bool s_use_ssse3 = utils::has_ssse3();
 
@@ -104,9 +106,9 @@ void fmt_class_string<ppu_join_status>::format(std::string& out, u64 arg)
 	});
 }
 
-constexpr ppu_decoder<ppu_interpreter_precise> g_ppu_interpreter_precise;
-constexpr ppu_decoder<ppu_interpreter_fast> g_ppu_interpreter_fast;
-constexpr ppu_decoder<ppu_itype> g_ppu_itype;
+const ppu_decoder<ppu_interpreter_precise> g_ppu_interpreter_precise;
+const ppu_decoder<ppu_interpreter_fast> g_ppu_interpreter_fast;
+const ppu_decoder<ppu_itype> g_ppu_itype;
 
 extern void ppu_initialize();
 extern void ppu_initialize(const ppu_module& info);
@@ -131,7 +133,7 @@ static u64 ppu_cache(u32 addr)
 		g_cfg.core.ppu_decoder == ppu_decoder_type::fast ? &g_ppu_interpreter_fast.get_table() :
 		(fmt::throw_exception("Invalid PPU decoder"), nullptr));
 
-	return reinterpret_cast<std::uintptr_t>(table[ppu_decode(vm::read32(addr))]);
+	return reinterpret_cast<uptr>(table[ppu_decode(vm::read32(addr))]);
 }
 
 static bool ppu_fallback(ppu_thread& ppu, ppu_opcode_t op)
@@ -181,20 +183,10 @@ void ppu_reservation_fallback(ppu_thread& ppu)
 {
 	const auto& table = g_ppu_interpreter_fast.get_table();
 
-	const u32 min_hle = ppu_function_manager::addr ? ppu_function_manager::addr : UINT32_MAX;
-	const u32 max_hle = min_hle + ppu_function_manager::get().size() * 8 - 1;
-
 	while (true)
 	{
 		// Run instructions in interpreter
 		const u32 op = vm::read32(ppu.cia);
-
-		if (op == ppu.cia && ppu.cia >= min_hle && ppu.cia <= max_hle)
-		{
-			// HLE function
-			// ppu.raddr = 0;
-			return;
-		}
 
 		if (table[ppu_decode(op)](ppu, {op})) [[likely]]
 		{
@@ -269,7 +261,7 @@ extern void ppu_register_function_at(u32 addr, u32 size, ppu_function_t ptr)
 	// Initialize specific function
 	if (ptr)
 	{
-		ppu_ref(addr) = reinterpret_cast<std::uintptr_t>(ptr);
+		ppu_ref(addr) = reinterpret_cast<uptr>(ptr);
 		return;
 	}
 
@@ -289,7 +281,7 @@ extern void ppu_register_function_at(u32 addr, u32 size, ppu_function_t ptr)
 	}
 
 	// Initialize interpreter cache
-	const u64 _break = reinterpret_cast<std::uintptr_t>(ppu_break);
+	const u64 _break = reinterpret_cast<uptr>(ppu_break);
 
 	while (size)
 	{
@@ -334,7 +326,7 @@ extern void ppu_breakpoint(u32 addr, bool isAdding)
 		return;
 	}
 
-	const u64 _break = reinterpret_cast<std::uintptr_t>(&ppu_break);
+	const u64 _break = reinterpret_cast<uptr>(&ppu_break);
 
 	if (isAdding)
 	{
@@ -356,7 +348,7 @@ extern void ppu_set_breakpoint(u32 addr)
 		return;
 	}
 
-	const u64 _break = reinterpret_cast<std::uintptr_t>(&ppu_break);
+	const u64 _break = reinterpret_cast<uptr>(&ppu_break);
 
 	if (ppu_ref(addr) != _break)
 	{
@@ -372,7 +364,7 @@ extern void ppu_remove_breakpoint(u32 addr)
 		return;
 	}
 
-	const auto _break = reinterpret_cast<std::uintptr_t>(&ppu_break);
+	const auto _break = reinterpret_cast<uptr>(&ppu_break);
 
 	if (ppu_ref(addr) == _break)
 	{
@@ -390,13 +382,13 @@ extern bool ppu_patch(u32 addr, u32 value)
 
 	vm::reader_lock rlock;
 
-	if (!vm::check_addr(addr, sizeof(value)))
+	if (!vm::check_addr(addr))
 	{
 		ppu_log.fatal("Patch failed at 0x%x: invalid memory address.", addr);
 		return false;
 	}
 
-	const bool is_exec = vm::check_addr(addr, sizeof(value), vm::page_executable);
+	const bool is_exec = vm::check_addr(addr, vm::page_executable);
 
 	if (is_exec && g_cfg.core.ppu_decoder == ppu_decoder_type::llvm && !Emu.IsReady())
 	{
@@ -407,8 +399,8 @@ extern bool ppu_patch(u32 addr, u32 value)
 
 	*vm::get_super_ptr<u32>(addr) = value;
 
-	const u64 _break = reinterpret_cast<std::uintptr_t>(&ppu_break);
-	const u64 fallback = reinterpret_cast<std::uintptr_t>(&ppu_fallback);
+	const u64 _break = reinterpret_cast<uptr>(&ppu_break);
+	const u64 fallback = reinterpret_cast<uptr>(&ppu_fallback);
 
 	if (is_exec)
 	{
@@ -419,6 +411,31 @@ extern bool ppu_patch(u32 addr, u32 value)
 	}
 
 	return true;
+}
+
+std::array<u32, 2> op_branch_targets(u32 pc, ppu_opcode_t op)
+{
+	std::array<u32, 2> res{pc + 4, UINT32_MAX};
+
+	switch (const auto type = g_ppu_itype.decode(op.opcode))
+	{
+	case ppu_itype::B:
+	case ppu_itype::BC:
+	{
+		res[type == ppu_itype::BC ? 1 : 0] = ((op.aa ? 0 : pc) + (type == ppu_itype::B ? +op.bt24 : +op.bt14));
+		break;
+	}
+	case ppu_itype::BCCTR:
+	case ppu_itype::BCLR:
+	case ppu_itype::UNK:
+	{
+		res[0] = UINT32_MAX;
+		break;
+	}
+	default: break;
+	}
+
+	return res;
 }
 
 std::string ppu_thread::dump_all() const
@@ -444,18 +461,18 @@ std::string ppu_thread::dump_regs() const
 
 		fmt::append(ret, "r%d%s: 0x%-8llx", i, i <= 9 ? " " : "", reg);
 
-		const u32 max_str_len = 32;
-		const u32 hex_count = 8;
+		constexpr u32 max_str_len = 32;
+		constexpr u32 hex_count = 8;
 
-		if (reg <= UINT32_MAX && vm::check_addr(static_cast<u32>(reg), max_str_len))
+		if (reg <= UINT32_MAX && vm::check_addr<max_str_len>(static_cast<u32>(reg)))
 		{
 			bool is_function = false;
 			u32 toc = 0;
 
 			if (const u32 reg_ptr = *vm::get_super_ptr<u32>(static_cast<u32>(reg));
-				vm::check_addr(reg_ptr, max_str_len))
+				vm::check_addr<max_str_len>(reg_ptr))
 			{
-				if ((reg | reg_ptr) % 4 == 0 && vm::check_addr(reg_ptr, 4, vm::page_executable))
+				if ((reg | reg_ptr) % 4 == 0 && vm::check_addr(reg_ptr, vm::page_executable))
 				{
 					toc = *vm::get_super_ptr<u32>(static_cast<u32>(reg + 4));
 
@@ -466,7 +483,7 @@ std::string ppu_thread::dump_regs() const
 					}
 				}
 			}
-			else if (reg % 4 == 0 && vm::check_addr(reg, 4, vm::page_executable))
+			else if (reg % 4 == 0 && vm::check_addr(reg, vm::page_executable))
 			{
 				is_function = true;
 			}
@@ -483,7 +500,11 @@ std::string ppu_thread::dump_regs() const
 				}
 				else
 				{
-					fmt::append(ret, " -> function-code");
+					PPUDisAsm dis_asm(CPUDisAsm_NormalMode);
+					dis_asm.offset = vm::g_sudo_addr;
+					dis_asm.dump_pc = reg;
+					dis_asm.disasm(reg);
+					fmt::append(ret, " -> %s", dis_asm.last_opcode);
 				}
 			}
 			else if (std::isprint(static_cast<u8>(buf_tmp[0])) && std::isprint(static_cast<u8>(buf_tmp[1])) && std::isprint(static_cast<u8>(buf_tmp[2])))
@@ -509,9 +530,24 @@ std::string ppu_thread::dump_regs() const
 		fmt::append(ret, "f%d%s: %.6G\n", i, i <= 9 ? " " : "", fpr[i]);
 	}
 
-	for (uint i = 0; i < 32; ++i)
+	for (uint i = 0; i < 32; ++i, ret += '\n')
 	{
-		fmt::append(ret, "v%d%s: %s [x: %g y: %g z: %g w: %g]\n", i, i <= 9 ? " " : "", vr[i], vr[i]._f[3], vr[i]._f[2], vr[i]._f[1], vr[i]._f[0]);
+		fmt::append(ret, "v%d%s: ", i, i <= 9 ? " " : "");
+
+		const auto r = vr[i];
+		const u32 i3 = r.u32r[0];
+
+		if (v128::from32p(i3) == r)
+		{
+			// Shortand formatting
+			fmt::append(ret, "%08x", i3);
+			fmt::append(ret, " [x: %g]", r.fr[0]);
+		}
+		else
+		{
+			fmt::append(ret, "%08x %08x %08x %08x", r.u32r[0], r.u32r[1], r.u32r[2], r.u32r[3]);
+			fmt::append(ret, " [x: %g y: %g z: %g w: %g]", r.fr[0], r.fr[1], r.fr[2], r.fr[3]);
+		}
 	}
 
 	fmt::append(ret, "CR: 0x%08x\n", cr.pack());
@@ -538,7 +574,7 @@ std::string ppu_thread::dump_callstack() const
 	for (const auto& sp : dump_callstack_list())
 	{
 		// TODO: function addresses too
-		fmt::append(ret, "> from 0x%08x (r1=0x%08x)\n", sp.first, sp.second);
+		fmt::append(ret, "> from 0x%08x (sp=0x%08x)\n", sp.first, sp.second);
 	}
 
 	return ret;
@@ -558,7 +594,7 @@ std::vector<std::pair<u32, u32>> ppu_thread::dump_callstack_list() const
 
 	const u32 stack_ptr = static_cast<u32>(r1);
 
-	if (!vm::check_addr(stack_ptr, 1, vm::page_writable))
+	if (!vm::check_addr(stack_ptr, vm::page_writable))
 	{
 		// Normally impossible unless the code does not follow ABI rules
 		return {};
@@ -567,29 +603,57 @@ std::vector<std::pair<u32, u32>> ppu_thread::dump_callstack_list() const
 	u32 stack_min = stack_ptr & ~0xfff;
 	u32 stack_max = stack_min + 4096;
 
-	while (stack_min && vm::check_addr(stack_min - 4096, 4096, vm::page_writable))
+	while (stack_min && vm::check_addr(stack_min - 4096, vm::page_writable))
 	{
 		stack_min -= 4096;
 	}
 
-	while (stack_max + 4096 && vm::check_addr(stack_max, 4096, vm::page_writable))
+	while (stack_max + 4096 && vm::check_addr(stack_max, vm::page_writable))
 	{
 		stack_max += 4096;
 	}
 
 	std::vector<std::pair<u32, u32>> call_stack_list;
 
+	bool first = true;
+
 	for (
-		u64 sp = *vm::get_super_ptr<u64>(stack_ptr);
+		u64 sp = r1;
 		sp % 0x10 == 0u && sp >= stack_min && sp <= stack_max - ppu_stack_start_offset;
-		sp = *vm::get_super_ptr<u64>(static_cast<u32>(sp))
+		sp = *vm::get_super_ptr<u64>(static_cast<u32>(sp)), first = false
 		)
 	{
-		const u64 addr = *vm::get_super_ptr<u64>(static_cast<u32>(sp + 16));
+		u64 addr = *vm::get_super_ptr<u64>(static_cast<u32>(sp + 16));
 
-		if (addr > UINT32_MAX || addr % 4 || !vm::check_addr(static_cast<u32>(addr), 1, vm::page_executable))
+		auto is_invalid = [](u64 addr)
 		{
-			break;
+			if (addr > UINT32_MAX || addr % 4 || !vm::check_addr(static_cast<u32>(addr), vm::page_executable))
+			{
+				return true;
+			}
+
+			// Ignore HLE stop address
+			return addr == ppu_function_manager::func_addr(1) + 4;
+		};
+
+		if (is_invalid(addr))
+		{
+			if (first)
+			{
+				// Function hasn't saved LR, could be because it's a leaf function
+				// Use LR directly instead
+				addr = lr;
+
+				if (is_invalid(addr))
+				{
+					// Skip it, workaround
+					continue;
+				}
+			}
+			else
+			{
+				break;
+			}
 		}
 
 		// TODO: function addresses too
@@ -679,7 +743,7 @@ void ppu_thread::cpu_task()
 		{
 			if (arg >= 32)
 			{
-				fmt::throw_exception("Invalid ppu_cmd::set_gpr arg (0x%x)" HERE, arg);
+				fmt::throw_exception("Invalid ppu_cmd::set_gpr arg (0x%x)", arg);
 			}
 
 			gpr[arg % 32] = cmd_get(1).as<u64>();
@@ -690,7 +754,7 @@ void ppu_thread::cpu_task()
 		{
 			if (arg > 8)
 			{
-				fmt::throw_exception("Unsupported ppu_cmd::set_args size (0x%x)" HERE, arg);
+				fmt::throw_exception("Unsupported ppu_cmd::set_args size (0x%x)", arg);
 			}
 
 			for (u32 i = 0; i < arg; i++)
@@ -741,7 +805,7 @@ void ppu_thread::cpu_task()
 		}
 		default:
 		{
-			fmt::throw_exception("Unknown ppu_cmd(0x%x)" HERE, static_cast<u32>(type));
+			fmt::throw_exception("Unknown ppu_cmd(0x%x)", static_cast<u32>(type));
 		}
 		}
 	}
@@ -753,7 +817,7 @@ void ppu_thread::cpu_sleep()
 	raddr = 0;
 
 	// Setup wait flag and memory flags to relock itself
-	state += cpu_flag::wait + cpu_flag::memory;
+	state += g_use_rtm ? cpu_flag::wait : cpu_flag::wait + cpu_flag::memory;
 
 	if (auto ptr = vm::g_tls_locked)
 	{
@@ -867,7 +931,7 @@ ppu_thread::ppu_thread(const ppu_thread_params& param, std::string_view name, u3
 	, joiner(detached != 0 ? ppu_join_status::detached : ppu_join_status::joinable)
 	, entry_func(param.entry)
 	, start_time(get_guest_system_time())
-	, ppu_tname(stx::shared_cptr<std::string>::make(name))
+	, ppu_tname(make_single<std::string>(name))
 {
 	gpr[1] = stack_addr + stack_size - ppu_stack_start_offset;
 
@@ -951,8 +1015,8 @@ cmd64 ppu_thread::cmd_wait()
 
 be_t<u64>* ppu_thread::get_stack_arg(s32 i, u64 align)
 {
-	if (align != 1 && align != 2 && align != 4 && align != 8 && align != 16) fmt::throw_exception("Unsupported alignment: 0x%llx" HERE, align);
-	return vm::_ptr<u64>(vm::cast((gpr[1] + 0x30 + 0x8 * (i - 1)) & (0 - align), HERE));
+	if (align != 1 && align != 2 && align != 4 && align != 8 && align != 16) fmt::throw_exception("Unsupported alignment: 0x%llx", align);
+	return vm::_ptr<u64>(vm::cast((gpr[1] + 0x30 + 0x8 * (i - 1)) & (0 - align)));
 }
 
 void ppu_thread::fast_call(u32 addr, u32 rtoc)
@@ -965,18 +1029,24 @@ void ppu_thread::fast_call(u32 addr, u32 rtoc)
 
 	cia = addr;
 	gpr[2] = rtoc;
-	lr = ppu_function_manager::addr + 8; // HLE stop address
+	lr = ppu_function_manager::func_addr(1) + 4; // HLE stop address
 	current_function = nullptr;
 
 	g_tls_log_prefix = []
 	{
 		const auto _this = static_cast<ppu_thread*>(get_current_cpu_thread());
 
-		static thread_local stx::shared_cptr<std::string> name_cache;
+		static thread_local shared_ptr<std::string> name_cache;
 
 		if (!_this->ppu_tname.is_equal(name_cache)) [[unlikely]]
 		{
-			name_cache = _this->ppu_tname.load();
+			_this->ppu_tname.peek_op([&](const shared_ptr<std::string>& ptr)
+			{
+				if (ptr != name_cache)
+				{
+					name_cache = ptr;
+				}
+			});
 		}
 
 		const auto cia = _this->cia;
@@ -1028,13 +1098,13 @@ u32 ppu_thread::stack_push(u32 size, u32 align_v)
 	{
 		ppu_thread& context = static_cast<ppu_thread&>(*cpu);
 
-		const u32 old_pos = vm::cast(context.gpr[1], HERE);
+		const u32 old_pos = vm::cast(context.gpr[1]);
 		context.gpr[1] -= align(size + 4, 8); // room minimal possible size
 		context.gpr[1] &= ~(u64{align_v} - 1); // fix stack alignment
 
 		if (old_pos >= context.stack_addr && old_pos < context.stack_addr + context.stack_size && context.gpr[1] < context.stack_addr)
 		{
-			fmt::throw_exception("Stack overflow (size=0x%x, align=0x%x, SP=0x%llx, stack=*0x%x)" HERE, size, align_v, old_pos, context.stack_addr);
+			fmt::throw_exception("Stack overflow (size=0x%x, align=0x%x, SP=0x%llx, stack=*0x%x)", size, align_v, old_pos, context.stack_addr);
 		}
 		else
 		{
@@ -1045,7 +1115,7 @@ u32 ppu_thread::stack_push(u32 size, u32 align_v)
 		}
 	}
 
-	fmt::throw_exception("Invalid thread" HERE);
+	fmt::throw_exception("Invalid thread");
 }
 
 void ppu_thread::stack_pop_verbose(u32 addr, u32 size) noexcept
@@ -1064,7 +1134,7 @@ void ppu_thread::stack_pop_verbose(u32 addr, u32 size) noexcept
 		return;
 	}
 
-	ppu_log.error("Invalid thread" HERE);
+	ppu_log.error("Invalid thread");
 }
 
 extern u64 get_timebased_time();
@@ -1087,15 +1157,15 @@ extern void sse_cellbe_stvrx_v0(u64 addr, __m128i a);
 
 void ppu_trap(ppu_thread& ppu, u64 addr)
 {
-	verify(HERE), (addr & (~u64{UINT32_MAX} | 0x3)) == 0;
+	ensure((addr & (~u64{UINT32_MAX} | 0x3)) == 0);
 	ppu.cia = static_cast<u32>(addr);
 
 	u32 add = static_cast<u32>(g_cfg.core.stub_ppu_traps) * 4;
 
 	// If stubbing is enabled, check current instruction and the following
-	if (!add || !vm::check_addr(ppu.cia, 4, vm::page_executable) || !vm::check_addr(ppu.cia + add, 4, vm::page_executable))
+	if (!add || !vm::check_addr(ppu.cia, vm::page_executable) || !vm::check_addr(ppu.cia + add, vm::page_executable))
 	{
-		fmt::throw_exception("PPU Trap!" HERE);
+		fmt::throw_exception("PPU Trap!");
 	}
 
 	ppu_log.error("PPU Trap: Stubbing %d instructions %s.", std::abs(static_cast<s32>(add) / 4), add >> 31 ? "backwards" : "forwards");
@@ -1129,11 +1199,11 @@ static T ppu_load_acquire_reservation(ppu_thread& ppu, u32 addr)
 	perf_meter<"LARX"_u32> perf0;
 
 	// Do not allow stores accessed from the same cache line to past reservation load
-	std::atomic_thread_fence(std::memory_order_seq_cst);
+	atomic_fence_seq_cst();
 
 	if (addr % sizeof(T))
 	{
-		fmt::throw_exception("PPU %s: Unaligned address: 0x%08x" HERE, sizeof(T) == 4 ? "LWARX" : "LDARX", addr);
+		fmt::throw_exception("PPU %s: Unaligned address: 0x%08x", sizeof(T) == 4 ? "LWARX" : "LDARX", addr);
 	}
 
 	// Always load aligned 64-bit value
@@ -1161,8 +1231,8 @@ static T ppu_load_acquire_reservation(ppu_thread& ppu, u32 addr)
 			const auto inst = vm::_ptr<const nse_t<u32>>(cia);
 
 			// Search for STWCX or STDCX nearby (LDARX-STWCX and LWARX-STDCX loops will use accurate 128-byte reservations)
-			constexpr u32 store_cond = se_storage<u32>::swap(sizeof(T) == 8 ? 0x7C00012D : 0x7C0001AD);
-			constexpr u32 mask = se_storage<u32>::swap(0xFC0007FF);
+			constexpr u32 store_cond = stx::se_storage<u32>::swap(sizeof(T) == 8 ? 0x7C00012D : 0x7C0001AD);
+			constexpr u32 mask = stx::se_storage<u32>::swap(0xFC0007FF);
 
 			const auto store_vec = v128::from32p(store_cond);
 			const auto mask_vec = v128::from32p(mask);
@@ -1243,7 +1313,7 @@ static T ppu_load_acquire_reservation(ppu_thread& ppu, u32 addr)
 	else
 	{
 		mov_rdata(ppu.rdata, vm::_ref<spu_rdata_t>(addr & -128));
-		std::atomic_thread_fence(std::memory_order_acquire);
+		atomic_fence_acquire();
 
 		// Load relevant 64 bits of reservation data
 		std::memcpy(&rdata, &ppu.rdata[addr & 0x78], 8);
@@ -1344,7 +1414,6 @@ const auto ppu_stcx_accurate_tx = build_function_asm<u64(*)(u32 raddr, u64 rtime
 		c.jae(fall);
 	});
 	c.bt(x86::dword_ptr(args[2], ::offset32(&spu_thread::state) - ::offset32(&ppu_thread::rdata)), static_cast<u32>(cpu_flag::pause));
-	c.mov(x86::eax, _XABORT_EXPLICIT);
 	c.jc(fall);
 	c.xbegin(tx0);
 	c.mov(x86::rax, x86::qword_ptr(x86::rbx));
@@ -1426,17 +1495,9 @@ const auto ppu_stcx_accurate_tx = build_function_asm<u64(*)(u32 raddr, u64 rtime
 	c.bind(skip);
 	c.xend();
 	build_get_tsc(c, stamp1);
-	c.mov(x86::eax, _XABORT_EXPLICIT);
 	//c.jmp(fall);
 
 	c.bind(fall);
-
-	// Touch memory if transaction failed with status 0
-	c.test(x86::eax, x86::eax);
-	c.jnz(next);
-	c.xor_(x86::rbp, 0xf80);
-	c.lock().add(x86::dword_ptr(x86::rbp), 0);
-	c.xor_(x86::rbp, 0xf80);
 
 	Label fall2 = c.newLabel();
 	Label fail2 = c.newLabel();
@@ -1618,7 +1679,7 @@ static bool ppu_store_reservation(ppu_thread& ppu, u32 addr, u64 reg_value)
 
 	if (addr % sizeof(T))
 	{
-		fmt::throw_exception("PPU %s: Unaligned address: 0x%08x" HERE, sizeof(T) == 4 ? "STWCX" : "STDCX", addr);
+		fmt::throw_exception("PPU %s: Unaligned address: 0x%08x", sizeof(T) == 4 ? "STWCX" : "STDCX", addr);
 	}
 
 	auto& data = vm::_ref<atomic_be_t<u64>>(addr & -8);
@@ -1648,7 +1709,7 @@ static bool ppu_store_reservation(ppu_thread& ppu, u32 addr, u64 reg_value)
 		if (raddr / 128 != addr / 128 || !ppu.use_full_rdata)
 		{
 			// Even when the reservation address does not match the target address must be valid
-			if (!vm::check_addr(addr, 1, vm::page_writable))
+			if (!vm::check_addr(addr, vm::page_writable))
 			{
 				// Access violate
 				data += 0;
@@ -1676,7 +1737,7 @@ static bool ppu_store_reservation(ppu_thread& ppu, u32 addr, u64 reg_value)
 					auto& all_data = *vm::get_super_ptr<spu_rdata_t>(addr & -128);
 					auto& sdata = *vm::get_super_ptr<atomic_be_t<u64>>(addr & -8);
 
-					const bool ok = cpu_thread::suspend_all<+1>(&ppu, {all_data, all_data + 64, &res}, [&]
+					const bool ok = cpu_thread::suspend_all<+3>(&ppu, {all_data, all_data + 64, &res}, [&]
 					{
 						if ((res & -128) == rtime && cmp_rdata(ppu.rdata, all_data))
 						{
@@ -1711,8 +1772,8 @@ static bool ppu_store_reservation(ppu_thread& ppu, u32 addr, u64 reg_value)
 						return false;
 					}
 
-					_m_prefetchw(ppu.rdata);
-					_m_prefetchw(ppu.rdata + 64);
+					utils::prefetch_read(ppu.rdata);
+					utils::prefetch_read(ppu.rdata + 64);
 					ppu.last_faddr = addr;
 					ppu.last_ftime = res.load() & -128;
 					ppu.last_ftsc = __rdtsc();
@@ -1842,7 +1903,7 @@ static bool ppu_store_reservation(ppu_thread& ppu, u32 addr, u64 reg_value)
 		return false;
 	}())
 	{
-		res.notify_all();
+		res.notify_all(-128);
 
 		if (addr == ppu.last_faddr)
 		{
@@ -1920,7 +1981,7 @@ extern void ppu_initialize(const ppu_module& info)
 			if (g_cfg.core.ppu_debug && func.size && func.toc != umax)
 			{
 				s_ppu_toc->emplace(func.addr, func.toc);
-				ppu_ref(func.addr) = reinterpret_cast<std::uintptr_t>(&ppu_check_toc);
+				ppu_ref(func.addr) = reinterpret_cast<uptr>(&ppu_check_toc);
 			}
 		}
 
@@ -2253,9 +2314,10 @@ extern void ppu_initialize(const ppu_module& info)
 		globals.emplace_back(fmt::format("__cptr%x", suffix), reinterpret_cast<u64>(vm::g_exec_addr));
 
 		// Initialize segments for relocations
-		for (u32 i = 0; i < info.segs.size(); i++)
+		for (u32 i = 0, num = 0; i < info.segs.size(); i++)
 		{
-			globals.emplace_back(fmt::format("__seg%u_%x", i, suffix), info.segs[i].addr);
+			if (!info.segs[i].addr) continue;
+			globals.emplace_back(fmt::format("__seg%u_%x", num++, suffix), info.segs[i].addr);
 		}
 
 		link_workload.emplace_back(obj_name, false);
@@ -2419,6 +2481,7 @@ extern void ppu_initialize(const ppu_module& info)
 
 			for (const auto& seg : info.segs)
 			{
+				if (!seg.addr) continue;
 				*jit_mod.vars[index++] = seg.addr;
 			}
 		}

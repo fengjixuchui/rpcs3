@@ -4,7 +4,10 @@
 #include "version.h"
 #include "Emu/System.h"
 
-LOG_CHANNEL(patch_log);
+#include "util/types.hpp"
+#include "util/endian.hpp"
+
+LOG_CHANNEL(patch_log, "PAT");
 
 namespace config_key
 {
@@ -524,7 +527,7 @@ bool patch_engine::read_patch_node(patch_info& info, YAML::Node node, const YAML
 	if (!node)
 	{
 		append_log_message(log_messages, fmt::format("Skipping invalid patch node %s. (key: %s)", info.description, info.hash));
-		patch_log.error("Skipping invalid patch node %s. (key: %s)" HERE, info.description, info.hash);
+		patch_log.error("Skipping invalid patch node %s. (key: %s)", info.description, info.hash);
 		return false;
 	}
 
@@ -600,7 +603,7 @@ static std::size_t apply_modification(const patch_engine::patch_info& patch, u8*
 				// This patch is out of range for this segment
 				continue;
 			}
-			
+
 			offset -= ls_addr;
 		}
 

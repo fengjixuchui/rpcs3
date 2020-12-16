@@ -1,9 +1,10 @@
-﻿#include "rsx_debugger.h"
+#include "rsx_debugger.h"
 #include "gui_settings.h"
 #include "qt_utils.h"
 #include "memory_viewer_panel.h"
 #include "table_item_delegate.h"
 #include "Emu/RSX/RSXThread.h"
+#include "Emu/RSX/gcm_printing.h"
 
 #include <QHBoxLayout>
 #include <QHeaderView>
@@ -387,10 +388,10 @@ void Buffer::ShowWindowed()
 	if (m_isTex)
 	{
 		/*	u8 location = render->textures[m_cur_texture].location();
-			if(location <= 1 && vm::check_addr(rsx::get_address(render->textures[m_cur_texture].offset(), location, HERE))
+			if(location <= 1 && vm::check_addr(rsx::get_address(render->textures[m_cur_texture].offset(), location))
 				&& render->textures[m_cur_texture].width() && render->textures[m_cur_texture].height())
 				memory_viewer_panel::ShowImage(this,
-					rsx::get_address(render->textures[m_cur_texture].offset(), location, HERE), 1,
+					rsx::get_address(render->textures[m_cur_texture].offset(), location), 1,
 					render->textures[m_cur_texture].width(),
 					render->textures[m_cur_texture].height(), false);*/
 	}
@@ -451,7 +452,7 @@ namespace
 		case rsx::surface_color_format::x1r5g5b5_z1r5g5b5:
 		case rsx::surface_color_format::w32z32y32x32:
 		default:
-			fmt::throw_exception("Unsupported format for display" HERE);
+			fmt::throw_exception("Unsupported format for display");
 		}
 	}
 
@@ -661,7 +662,7 @@ void rsx_debugger::GetBuffers()
 		const u32 width  = buffers[bufferId].width;
 		const u32 height = buffers[bufferId].height;
 
-		if(!vm::check_addr(RSXbuffer_addr, width * height * 4))
+		if (!vm::check_addr(RSXbuffer_addr, vm::page_readable, width * height * 4))
 			continue;
 
 		const auto RSXbuffer = vm::get_super_ptr<const u8>(RSXbuffer_addr);
@@ -706,7 +707,7 @@ void rsx_debugger::GetBuffers()
 	if(location > 1)
 		return;
 
-	u32 TexBuffer_addr = rsx::get_address(offset, location, HERE);
+	u32 TexBuffer_addr = rsx::get_address(offset, location);
 
 	if(!vm::check_addr(TexBuffer_addr))
 		return;
@@ -907,7 +908,7 @@ void rsx_debugger::SetPC(const uint pc)
 
 void rsx_debugger::PerformJump(u32 address)
 {
-	if (!vm::check_addr(address, 4))
+	if (!vm::check_addr(address))
 		return;
 
 	u32 cmd = *vm::get_super_ptr<u32>(address);

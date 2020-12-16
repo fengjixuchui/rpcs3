@@ -1,15 +1,18 @@
-﻿#include "stdafx.h"
+#include "stdafx.h"
 #include "Emu/System.h"
 #include "Emu/system_config.h"
 #include "Emu/Cell/PPUModule.h"
 #include "Emu/Io/interception.h"
 #include "Emu/RSX/Overlays/overlay_osk.h"
+#include "Emu/IdManager.h"
 
 #include "cellSysutil.h"
 #include "cellOskDialog.h"
 #include "cellMsgDialog.h"
 
 #include "util/init_mutex.hpp"
+
+#include <thread>
 
 LOG_CHANNEL(cellOskDialog);
 
@@ -189,7 +192,7 @@ error_code cellOskDialogLoadAsync(u32 container, vm::ptr<CellOskDialogParam> dia
 				});
 
 				// wait for check callback
-				while (done == false)
+				while (!done)
 				{
 					std::this_thread::yield();
 				}

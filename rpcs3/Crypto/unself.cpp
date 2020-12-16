@@ -1,14 +1,15 @@
-﻿#include "stdafx.h"
+#include "stdafx.h"
 #include "aes.h"
 #include "sha1.h"
 #include "utils.h"
 #include "unself.h"
-#include "Utilities/BEType.h"
 #include "Emu/VFS.h"
 #include "Emu/System.h"
 
 #include <algorithm>
 #include <zlib.h>
+
+#include "util/v128.hpp"
 
 inline u8 Read8(const fs::file& f)
 {
@@ -745,7 +746,7 @@ bool SCEDecrypter::DecryptData()
 	// Calculate the total data size.
 	for (unsigned int i = 0; i < meta_hdr.section_count; i++)
 	{
-		data_buf_length += ::narrow<u32>(meta_shdr[i].data_size, HERE);
+		data_buf_length += ::narrow<u32>(meta_shdr[i].data_size);
 	}
 
 	// Allocate a buffer to store decrypted data.
@@ -799,7 +800,7 @@ bool SCEDecrypter::DecryptData()
 		}
 
 		// Advance the buffer's offset.
-		data_buf_offset += ::narrow<u32>(meta_shdr[i].data_size, HERE);
+		data_buf_offset += ::narrow<u32>(meta_shdr[i].data_size);
 	}
 
 	return true;
@@ -829,7 +830,7 @@ std::vector<fs::file> SCEDecrypter::MakeFile()
 			strm.zalloc = Z_NULL;
 			strm.zfree = Z_NULL;
 			strm.opaque = Z_NULL;
-			strm.avail_in = ::narrow<uInt>(meta_shdr[i].data_size, HERE);
+			strm.avail_in = ::narrow<uInt>(meta_shdr[i].data_size);
 			strm.avail_out = BUFSIZE;
 			strm.next_in = data_buf.get()+data_buf_offset;
 			strm.next_out = tempbuf;
@@ -874,7 +875,7 @@ std::vector<fs::file> SCEDecrypter::MakeFile()
 		}
 
 		// Advance the data buffer offset by data size.
-		data_buf_offset += ::narrow<u32>(meta_shdr[i].data_size, HERE);
+		data_buf_offset += ::narrow<u32>(meta_shdr[i].data_size);
 
 		if (out_f.pos() != out_f.size())
 			fmt::throw_exception("MakeELF written bytes (%llu) does not equal buffer size (%llu).", out_f.pos(), out_f.size());
@@ -1243,7 +1244,7 @@ bool SELFDecrypter::DecryptData()
 		if (meta_shdr[i].encrypted == 3)
 		{
 			if ((meta_shdr[i].key_idx <= meta_hdr.key_count - 1) && (meta_shdr[i].iv_idx <= meta_hdr.key_count))
-				data_buf_length += ::narrow<u32>(meta_shdr[i].data_size, HERE);
+				data_buf_length += ::narrow<u32>(meta_shdr[i].data_size);
 		}
 	}
 
@@ -1289,7 +1290,7 @@ bool SELFDecrypter::DecryptData()
 				memcpy(data_buf.get() + data_buf_offset, buf.get(), meta_shdr[i].data_size);
 
 				// Advance the buffer's offset.
-				data_buf_offset += ::narrow<u32>(meta_shdr[i].data_size, HERE);
+				data_buf_offset += ::narrow<u32>(meta_shdr[i].data_size);
 			}
 		}
 	}
