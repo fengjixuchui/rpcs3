@@ -61,6 +61,7 @@ namespace vk
 		table.add(0x1F82, 0x1FB9, chip_class::NV_turing); // TU117, TU117M, TU117GL
 		table.add(0x2182, 0x21D1, chip_class::NV_turing); // TU116, TU116M, TU116GL
 		table.add(0x20B0, 0x20BE, chip_class::NV_ampere); // GA100
+		table.add(0x2204, 0x25AF, chip_class::NV_ampere); // GA10x (RTX 30 series)
 
 		return table;
 	}();
@@ -94,7 +95,7 @@ namespace vk
 	u64 g_num_processed_frames = 0;
 	u64 g_num_total_frames = 0;
 
-	VKAPI_ATTR void* VKAPI_CALL mem_realloc(void* pUserData, void* pOriginal, size_t size, size_t alignment, VkSystemAllocationScope allocationScope)
+	VKAPI_ATTR void* VKAPI_CALL mem_realloc(void* pUserData, void* pOriginal, usz size, usz alignment, VkSystemAllocationScope allocationScope)
 	{
 #ifdef _MSC_VER
 		return _aligned_realloc(pOriginal, size, alignment);
@@ -105,7 +106,7 @@ namespace vk
 #endif
 	}
 
-	VKAPI_ATTR void* VKAPI_CALL mem_alloc(void* pUserData, size_t size, size_t alignment, VkSystemAllocationScope allocationScope)
+	VKAPI_ATTR void* VKAPI_CALL mem_alloc(void* pUserData, usz size, usz alignment, VkSystemAllocationScope allocationScope)
 	{
 #ifdef _MSC_VER
 		return _aligned_malloc(size, alignment);
@@ -127,11 +128,11 @@ namespace vk
 #endif
 	}
 
-	bool data_heap::grow(size_t size)
+	bool data_heap::grow(usz size)
 	{
 		// Create new heap. All sizes are aligned up by 64M, upto 1GiB
-		const size_t size_limit = 1024 * 0x100000;
-		const size_t aligned_new_size = align(m_size + size, 64 * 0x100000);
+		const usz size_limit = 1024 * 0x100000;
+		const usz aligned_new_size = align(m_size + size, 64 * 0x100000);
 
 		if (aligned_new_size >= size_limit)
 		{
@@ -237,7 +238,7 @@ namespace vk
 		return result;
 	}
 
-	chip_class get_chip_family(uint32_t vendor_id, uint32_t device_id)
+	chip_class get_chip_family(u32 vendor_id, u32 device_id)
 	{
 		if (vendor_id == 0x10DE)
 		{
@@ -1123,7 +1124,7 @@ namespace vk
 	}
 
 	VKAPI_ATTR VkBool32 VKAPI_CALL dbgFunc(VkFlags msgFlags, VkDebugReportObjectTypeEXT objType,
-											uint64_t srcObject, size_t location, int32_t msgCode,
+											u64 srcObject, usz location, s32 msgCode,
 											const char *pLayerPrefix, const char *pMsg, void *pUserData)
 	{
 		if (msgFlags & VK_DEBUG_REPORT_ERROR_BIT_EXT)
@@ -1146,7 +1147,7 @@ namespace vk
 	}
 
 	VkBool32 BreakCallback(VkFlags msgFlags, VkDebugReportObjectTypeEXT objType,
-							uint64_t srcObject, size_t location, int32_t msgCode,
+							u64 srcObject, usz location, s32 msgCode,
 							const char *pLayerPrefix, const char *pMsg, void *pUserData)
 	{
 #ifdef _WIN32

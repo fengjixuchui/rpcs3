@@ -9,6 +9,8 @@
 #include "Emu/RSX/rsx_methods.h"
 #include "Emu/Memory/vm_locking.h"
 
+#include "util/asm.hpp"
+
 namespace vk
 {
 	VkCompareOp get_compare_func(rsx::comparison_function op, bool reverse_direction = false);
@@ -195,7 +197,7 @@ namespace
 		const auto& binding_table = vk::get_current_renderer()->get_pipeline_binding_table();
 		std::vector<VkDescriptorSetLayoutBinding> bindings(binding_table.total_descriptor_bindings);
 
-		size_t idx = 0;
+		usz idx = 0;
 
 		// Vertex stream, one stream for cacheable data, one stream for transient data
 		for (int i = 0; i < 3; i++)
@@ -292,7 +294,7 @@ namespace
 		VkDescriptorSetLayoutCreateInfo infos = {};
 		infos.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
 		infos.pBindings = bindings.data();
-		infos.bindingCount = static_cast<uint32_t>(bindings.size());
+		infos.bindingCount = static_cast<u32>(bindings.size());
 
 		VkDescriptorSetLayout set_layout;
 		CHECK_RESULT(vkCreateDescriptorSetLayout(dev, &infos, nullptr, &set_layout));
@@ -467,7 +469,7 @@ VKGSRender::VKGSRender() : GSRender()
 	{
 		vkCreateSemaphore((*m_device), &semaphore_info, nullptr, &ctx.present_wait_semaphore);
 		vkCreateSemaphore((*m_device), &semaphore_info, nullptr, &ctx.acquire_signal_semaphore);
-		ctx.descriptor_pool.create(*m_device, sizes.data(), static_cast<uint32_t>(sizes.size()), DESCRIPTOR_MAX_DRAW_CALLS, 1);
+		ctx.descriptor_pool.create(*m_device, sizes.data(), static_cast<u32>(sizes.size()), DESCRIPTOR_MAX_DRAW_CALLS, 1);
 	}
 
 	const auto& memory_map = m_device->get_memory_mapping();
@@ -1870,8 +1872,8 @@ void VKGSRender::update_vertex_env(u32 id, const vk::vertex_upload_info& vertex_
 		if (m_vertex_layout_storage)
 			m_current_frame->buffer_views_to_clean.push_back(std::move(m_vertex_layout_storage));
 
-		const size_t alloc_addr = m_vertex_layout_stream_info.offset;
-		const size_t view_size = (alloc_addr + m_texbuffer_view_size) > m_vertex_layout_ring_info.size() ? m_vertex_layout_ring_info.size() - alloc_addr : m_texbuffer_view_size;
+		const usz alloc_addr = m_vertex_layout_stream_info.offset;
+		const usz view_size = (alloc_addr + m_texbuffer_view_size) > m_vertex_layout_ring_info.size() ? m_vertex_layout_ring_info.size() - alloc_addr : m_texbuffer_view_size;
 		m_vertex_layout_storage = std::make_unique<vk::buffer_view>(*m_device, m_vertex_layout_ring_info.heap->value, VK_FORMAT_R32G32_UINT, alloc_addr, view_size);
 		base_offset = 0;
 	}
@@ -1892,7 +1894,7 @@ void VKGSRender::update_vertex_env(u32 id, const vk::vertex_upload_info& vertex_
 
 	vkCmdPushConstants(*m_current_command_buffer, pipeline_layout, VK_SHADER_STAGE_VERTEX_BIT, 0, data_size, draw_info);
 
-	const size_t data_offset = (id * 128) + m_vertex_layout_stream_info.offset;
+	const usz data_offset = (id * 128) + m_vertex_layout_stream_info.offset;
 	auto dst = m_vertex_layout_ring_info.map(data_offset, 128);
 
 	fill_vertex_layout_state(m_vertex_layout, vertex_info.first_vertex, vertex_info.allocated_vertex_count, static_cast<s32*>(dst),
@@ -2443,8 +2445,8 @@ void VKGSRender::begin_conditional_rendering(const std::vector<rsx::reports::occ
 
 	auto scratch = vk::get_scratch_buffer();
 	u32 dst_offset = 0;
-	size_t first = 0;
-	size_t last;
+	usz first = 0;
+	usz last;
 
 	if (!partial_eval) [[likely]]
 	{
@@ -2455,7 +2457,7 @@ void VKGSRender::begin_conditional_rendering(const std::vector<rsx::reports::occ
 		last = 1;
 	}
 
-	for (size_t i = first; i < last; ++i)
+	for (usz i = first; i < last; ++i)
 	{
 		auto& query_info = m_occlusion_map[sources[i]->driver_handle];
 		for (const auto& index : query_info.indices)
