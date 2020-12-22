@@ -1,13 +1,5 @@
 #pragma once // No BOM and only basic ASCII in this header, or a neko will die
 
-#ifdef _MSC_VER
-#include <intrin.h>
-#else
-#include <x86intrin.h>
-#endif
-#include <immintrin.h>
-#include <emmintrin.h>
-
 #include <cstdint>
 #include <cstddef>
 #include <cstring>
@@ -278,9 +270,27 @@ public:
 };
 
 #ifndef _MSC_VER
+
 using u128 = __uint128_t;
 using s128 = __int128_t;
+
+using __m128i = long long __attribute__((vector_size(16)));
+using __m128d = double __attribute__((vector_size(16)));
+using __m128 = float __attribute__((vector_size(16)));
+
 #else
+
+extern "C"
+{
+	union __m128;
+	union __m128i;
+	struct __m128d;
+
+	uchar _addcarry_u64(uchar, u64, u64, u64*);
+	uchar _subborrow_u64(uchar, u64, u64, u64*);
+	u64 __shiftleft128(u64, u64, uchar);
+	u64 __shiftright128(u64, u64, uchar);
+}
 
 // Unsigned 128-bit integer implementation (TODO)
 struct alignas(16) u128
@@ -594,31 +604,6 @@ struct f16
 		return std::bit_cast<f32>(raw);
 	}
 };
-
-template <typename T, typename = std::enable_if_t<std::is_integral<T>::value && std::is_unsigned<T>::value>>
-constexpr T align(T value, ullong align)
-{
-	return static_cast<T>((value + (align - 1)) & (0 - align));
-}
-
-// General purpose aligned division, the result is rounded up not truncated
-template <typename T, typename = std::enable_if_t<std::is_integral<T>::value && std::is_unsigned<T>::value>>
-constexpr T aligned_div(T value, ullong align)
-{
-	return static_cast<T>((value + align - 1) / align);
-}
-
-// General purpose aligned division, the result is rounded to nearest
-template <typename T, typename = std::enable_if_t<std::is_integral<T>::value>>
-constexpr T rounded_div(T value, std::conditional_t<std::is_signed<T>::value, llong, ullong> align)
-{
-	if constexpr (std::is_unsigned<T>::value)
-	{
-		return static_cast<T>((value + (align / 2)) / align);
-	}
-
-	return static_cast<T>((value + (value < 0 ? 0 - align : align) / 2) / align);
-}
 
 template <typename T, typename T2>
 inline u32 offset32(T T2::*const mptr)

@@ -15,6 +15,8 @@
 #include <QWheelEvent>
 #include <shared_mutex>
 
+#include "util/asm.hpp"
+
 constexpr auto qstr = QString::fromStdString;
 
 memory_viewer_panel::memory_viewer_panel(QWidget* parent, u32 addr)
@@ -24,7 +26,6 @@ memory_viewer_panel::memory_viewer_panel(QWidget* parent, u32 addr)
 	setWindowTitle(tr("Memory Viewer"));
 	setObjectName("memory_viewer");
 	setAttribute(Qt::WA_DeleteOnClose);
-	exit = false;
 	m_colcount = 4;
 	m_rowcount = 16;
 	m_addr -= m_addr % (m_colcount * 4); // Align by amount of bytes in a row
@@ -202,6 +203,7 @@ memory_viewer_panel::memory_viewer_panel(QWidget* parent, u32 addr)
 	vbox_panel->addSpacing(10);
 	vbox_panel->addLayout(hbox_mem_panel, 1);
 	vbox_panel->addSpacing(10);
+	vbox_panel->setSizeConstraint(QLayout::SetNoConstraint);
 	setLayout(vbox_panel);
 
 	// Events
@@ -209,7 +211,7 @@ memory_viewer_panel::memory_viewer_panel(QWidget* parent, u32 addr)
 	{
 		bool ok;
 		const QString text = m_addr_line->text();
-		m_addr = (text.startsWith("0x", Qt::CaseInsensitive) ? text.right(text.size() - 2) : text).toULong(&ok, 16); 
+		m_addr = (text.startsWith("0x", Qt::CaseInsensitive) ? text.right(text.size() - 2) : text).toULong(&ok, 16);
 		m_addr -= m_addr % (m_colcount * 4); // Align by amount of bytes in a row
 		m_addr_line->setText(QString("%1").arg(m_addr, 8, 16, QChar('0')));	// get 8 digits in input line
 		ShowMemory();
@@ -240,7 +242,6 @@ memory_viewer_panel::memory_viewer_panel(QWidget* parent, u32 addr)
 
 memory_viewer_panel::~memory_viewer_panel()
 {
-	exit = true;
 }
 
 void memory_viewer_panel::wheelEvent(QWheelEvent *event)
@@ -272,8 +273,7 @@ void memory_viewer_panel::resizeEvent(QResizeEvent *event)
 	const QMargins margins = layout()->contentsMargins();
 
 	int free_height = event->size().height()
-		- (layout()->count() * (margins.top() + margins.bottom()))
-		- font_height; // bottom margin to allow shrinking
+		- (layout()->count() * (margins.top() + margins.bottom()));
 
 	for (int i = 0; i < layout()->count(); i++)
 	{
@@ -281,6 +281,7 @@ void memory_viewer_panel::resizeEvent(QResizeEvent *event)
 			free_height -= layout()->itemAt(i)->sizeHint().height();
 	}
 
+	setMinimumHeight(event->size().height() - free_height + font_height);
 	const u32 new_row_count = std::max(0, free_height) / font_height;
 
 	if (m_rowcount != new_row_count)
@@ -293,7 +294,7 @@ void memory_viewer_panel::resizeEvent(QResizeEvent *event)
 std::string memory_viewer_panel::getHeaderAtAddr(u32 addr)
 {
 	// Check if its an SPU Local Storage beginning
-	const u32 spu_boundary = ::align<u32>(addr, SPU_LS_SIZE);
+	const u32 spu_boundary = utils::align<u32>(addr, SPU_LS_SIZE);
 
 	if (spu_boundary <= addr + m_colcount * 4 - 1)
 	{

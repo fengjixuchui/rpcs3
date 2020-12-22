@@ -7,7 +7,6 @@
 #include "Emu/Cell/lv2/sys_event.h"
 #include "Thread.h"
 #include "Utilities/JIT.h"
-#include "sysinfo.h"
 #include <typeinfo>
 #include <thread>
 #include <sstream>
@@ -77,6 +76,9 @@
 #include "util/vm.hpp"
 #include "util/logs.hpp"
 #include "util/asm.hpp"
+#include "util/v128.hpp"
+#include "util/v128sse.hpp"
+#include "util/sysinfo.hpp"
 #include "Emu/Memory/vm_locking.h"
 
 LOG_CHANNEL(sig_log, "SIG");

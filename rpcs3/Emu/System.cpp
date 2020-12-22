@@ -28,10 +28,10 @@
 #include "Loader/ELF.h"
 
 #include "Utilities/StrUtil.h"
-#include "Utilities/sysinfo.h"
 
 #include "../Crypto/unself.h"
 #include "../Crypto/unpkg.h"
+#include "util/sysinfo.hpp"
 #include "util/yaml.hpp"
 #include "util/logs.hpp"
 
@@ -1564,7 +1564,7 @@ game_boot_result Emulator::Load(const std::string& title_id, bool add_only, bool
 				elf_file.open(decrypted_path);
 			}
 			// Decrypt SELF
-			else if ((elf_file = decrypt_self(std::move(elf_file), klic.empty() ? nullptr : klic.data(), &g_ps3_process_info.self_info)))
+			else if ((elf_file = decrypt_self(std::move(elf_file), klic.empty() ? nullptr : reinterpret_cast<u8*>(&klic[0]), &g_ps3_process_info.self_info)))
 			{
 				if (true)
 				{
@@ -1807,8 +1807,7 @@ void Emulator::Resume()
 	// Print and reset debug data collected
 	if (m_state == system_state::paused && g_cfg.core.ppu_debug)
 	{
-		PPUDisAsm dis_asm(CPUDisAsm_DumpMode);
-		dis_asm.offset = vm::g_sudo_addr;
+		PPUDisAsm dis_asm(CPUDisAsm_DumpMode, vm::g_sudo_addr);
 
 		std::string dump;
 
@@ -1818,7 +1817,6 @@ void Emulator::Resume()
 			{
 				if (auto& data = *reinterpret_cast<be_t<u32>*>(vm::g_stat_addr + i))
 				{
-					dis_asm.dump_pc = i;
 					dis_asm.disasm(i);
 					fmt::append(dump, "\n\t'%08X' %s", data, dis_asm.last_opcode);
 					data = 0;
@@ -1979,10 +1977,13 @@ bool Emulator::Quit(bool force_quit)
 {
 	m_force_boot = false;
 
-	// Deinitialize object manager to prevent any hanging objects at program exit
-	*g_fxo = {};
-
-	return GetCallbacks().exit(force_quit);
+	// The callback is only used if we actually quit RPCS3
+	const auto on_exit = []()
+	{
+		// Deinitialize object manager to prevent any hanging objects at program exit
+		*g_fxo = {};
+	};
+	return GetCallbacks().try_to_quit(force_quit, on_exit);
 }
 
 std::string Emulator::GetFormattedTitle(double fps) const
