@@ -53,19 +53,38 @@ memory_viewer_panel::memory_viewer_panel(QWidget* parent, u32 addr)
 	m_addr_line->setPlaceholderText("00000000");
 	m_addr_line->setText(qstr(fmt::format("%08x", m_addr)));
 	m_addr_line->setFont(mono);
-	m_addr_line->setMaxLength(10);
+	m_addr_line->setMaxLength(18);
 	m_addr_line->setFixedWidth(75);
 	m_addr_line->setFocus();
-	m_addr_line->setValidator(new QRegExpValidator(QRegExp("^([0][xX])?[a-fA-F0-9]{0,8}$")));
+	m_addr_line->setValidator(new QRegExpValidator(QRegExp("^(0[xX])?0*[a-fA-F0-9]{0,8}$")));
 	hbox_tools_mem_addr->addWidget(m_addr_line);
 	tools_mem_addr->setLayout(hbox_tools_mem_addr);
 
 	// Tools: Memory Viewer Options: Words
 	QGroupBox* tools_mem_words = new QGroupBox(tr("Words"));
 	QHBoxLayout* hbox_tools_mem_words = new QHBoxLayout();
-	QSpinBox* sb_words = new QSpinBox(this);
-	sb_words->setRange(1, 4);
-	sb_words->setValue(4);
+
+	class words_spin_box : public QSpinBox
+	{
+	public:
+		words_spin_box(QWidget* parent = nullptr) : QSpinBox(parent) {}
+		~words_spin_box() override {};
+
+	private:
+		int valueFromText(const QString &text) const override
+		{
+			return std::countr_zero(text.toULong());
+		}
+
+		QString textFromValue(int value) const override
+		{
+			return tr("%0").arg(1 << value);
+		}
+	};
+
+	words_spin_box* sb_words = new words_spin_box(this);
+	sb_words->setRange(0, 2);
+	sb_words->setValue(2);
 	hbox_tools_mem_words->addWidget(sb_words);
 	tools_mem_words->setLayout(hbox_tools_mem_words);
 
@@ -209,16 +228,18 @@ memory_viewer_panel::memory_viewer_panel(QWidget* parent, u32 addr)
 	// Events
 	connect(m_addr_line, &QLineEdit::returnPressed, [this]()
 	{
-		bool ok;
+		bool ok = false;
 		const QString text = m_addr_line->text();
-		m_addr = (text.startsWith("0x", Qt::CaseInsensitive) ? text.right(text.size() - 2) : text).toULong(&ok, 16);
+		const u32 addr = (text.startsWith("0x", Qt::CaseInsensitive) ? text.right(text.size() - 2) : text).toULong(&ok, 16);
+		if (!ok) return;
+
 		m_addr -= m_addr % (m_colcount * 4); // Align by amount of bytes in a row
 		m_addr_line->setText(QString("%1").arg(m_addr, 8, 16, QChar('0')));	// get 8 digits in input line
 		ShowMemory();
 	});
 	connect(sb_words, static_cast<void (QSpinBox::*)(int)>(&QSpinBox::valueChanged), [=, this]()
 	{
-		m_colcount = sb_words->value();
+		m_colcount = 1 << sb_words->value();
 		ShowMemory();
 	});
 
@@ -303,10 +324,20 @@ std::string memory_viewer_panel::getHeaderAtAddr(u32 addr)
 		if (u32 raw_spu_index = (spu_boundary - RAW_SPU_BASE_ADDR) / SPU_LS_SIZE; raw_spu_index < 5)
 		{
 			spu = idm::get<named_thread<spu_thread>>(spu_thread::find_raw_spu(raw_spu_index));
+
+			if (spu && spu->get_type() == spu_type::threaded)
+			{
+				spu.reset();
+			}
 		}
 		else if (u32 spu_index = (spu_boundary - SPU_FAKE_BASE_ADDR) / SPU_LS_SIZE; spu_index < spu_thread::id_count)
 		{
 			spu = idm::get<named_thread<spu_thread>>(spu_thread::id_base | spu_index);
+
+			if (spu && spu->get_type() != spu_type::threaded)
+			{
+				spu.reset();
+			}
 		}
 
 		if (spu)

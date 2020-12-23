@@ -19,6 +19,7 @@
 #include "Loader/PSF.h"
 #include "util/types.hpp"
 #include "Utilities/lockless.h"
+#include "Utilities/File.h"
 #include "util/yaml.hpp"
 #include "Input/pad_thread.h"
 
@@ -27,6 +28,7 @@
 #include <memory>
 #include <set>
 #include <regex>
+#include <unordered_map>
 
 #include <QtConcurrent>
 #include <QDesktopServices>
