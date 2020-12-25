@@ -345,6 +345,7 @@
     <ClCompile Include="Emu\RSX\CgBinaryVertexProgram.cpp" />
     <ClCompile Include="Emu\RSX\Common\BufferUtils.cpp" />
     <ClCompile Include="Emu\RSX\Common\FragmentProgramDecompiler.cpp" />
+    <ClCompile Include="Emu\RSX\Common\GLSLCommon.cpp" />
     <ClCompile Include="Emu\RSX\Common\ProgramStateCache.cpp" />
     <ClCompile Include="Emu\RSX\Common\surface_store.cpp" />
     <ClCompile Include="Emu\RSX\Common\TextureUtils.cpp" />
@@ -495,6 +496,7 @@
     <ClInclude Include="..\Utilities\sync.h" />
     <ClInclude Include="util\endian.hpp" />
     <ClInclude Include="util\fixed_typemap.hpp" />
+    <ClInclude Include="util\auto_typemap.hpp" />
     <ClInclude Include="util\init_mutex.hpp" />
     <ClInclude Include="util\logs.hpp" />
     <ClInclude Include="..\Utilities\dyn_lib.hpp" />
