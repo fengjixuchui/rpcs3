@@ -5,6 +5,7 @@
 #include "Emu/Cell/RawSPUThread.h"
 #include "Emu/Cell/lv2/sys_mmapper.h"
 #include "Emu/Cell/lv2/sys_event.h"
+#include "Emu/RSX/RSXThread.h"
 #include "Thread.h"
 #include "Utilities/JIT.h"
 #include <typeinfo>
@@ -102,6 +103,32 @@ void fmt_class_string<std::thread::id>::format(std::string& out, u64 arg)
 	std::ostringstream ss;
 	ss << get_object(arg);
 	out += ss.str();
+}
+
+std::string dump_useful_thread_info()
+{
+	thread_local volatile bool guard = false;
+
+	std::string result;
+
+	// In case the dumping function was the cause for the exception/access violation
+	// Avoid recursion
+	if (std::exchange(guard, true))
+	{
+		return result;
+	}
+
+	if (auto cpu = get_current_cpu_thread())
+	{
+		result = cpu->dump_all();
+	}
+	else if (auto render = rsx::get_current_renderer(); render && render->is_current_thread())
+	{
+		result = render->dump_regs();
+	}
+
+	guard = false;
+	return result;
 }
 
 #ifndef _WIN32
@@ -542,7 +569,7 @@ void decode_x64_reg_op(const u8* code, x64_op_t& out_op, x64_reg_t& out_reg, usz
 	}
 	case 0x80:
 	{
-		switch (auto mod_code = get_modRM_reg(code, 0))
+		switch (get_modRM_reg(code, 0))
 		{
 		//case 0: out_op = X64OP_ADD; break; // TODO: strange info in instruction manual
 		case 1: out_op = X64OP_OR; break;
@@ -561,7 +588,7 @@ void decode_x64_reg_op(const u8* code, x64_op_t& out_op, x64_reg_t& out_reg, usz
 	}
 	case 0x81:
 	{
-		switch (auto mod_code = get_modRM_reg(code, 0))
+		switch (get_modRM_reg(code, 0))
 		{
 		case 0: out_op = X64OP_ADD; break;
 		case 1: out_op = X64OP_OR; break;
@@ -580,7 +607,7 @@ void decode_x64_reg_op(const u8* code, x64_op_t& out_op, x64_reg_t& out_reg, usz
 	}
 	case 0x83:
 	{
-		switch (auto mod_code = get_modRM_reg(code, 0))
+		switch (get_modRM_reg(code, 0))
 		{
 		case 0: out_op = X64OP_ADD; break;
 		case 1: out_op = X64OP_OR; break;
@@ -721,7 +748,7 @@ void decode_x64_reg_op(const u8* code, x64_op_t& out_op, x64_reg_t& out_reg, usz
 		const u8 vopm = op1 == 0xc5 ? 1 : op2 & 0x1f;
 		const u8 vop1 = op1 == 0xc5 ? op3 : code[2];
 		const u8 vlen = (opx & 0x4) ? 32 : 16;
-		const u8 vreg = (~opx >> 3) & 0xf;
+		//const u8 vreg = (~opx >> 3) & 0xf;
 		out_length += op1 == 0xc5 ? 2 : 3;
 		code += op1 == 0xc5 ? 2 : 3;
 
@@ -782,7 +809,7 @@ void decode_x64_reg_op(const u8* code, x64_op_t& out_op, x64_reg_t& out_reg, usz
 	}
 	case 0xf6:
 	{
-		switch (auto mod_code = get_modRM_reg(code, 0))
+		switch (get_modRM_reg(code, 0))
 		{
 		case 0: out_op = X64OP_LOAD_TEST; break;
 		default: out_op = X64OP_NONE; break; // TODO...
@@ -795,7 +822,7 @@ void decode_x64_reg_op(const u8* code, x64_op_t& out_op, x64_reg_t& out_reg, usz
 	}
 	case 0xf7:
 	{
-		switch (auto mod_code = get_modRM_reg(code, 0))
+		switch (get_modRM_reg(code, 0))
 		{
 		case 0: out_op = X64OP_LOAD_TEST; break;
 		default: out_op = X64OP_NONE; break; // TODO...
@@ -1531,7 +1558,7 @@ bool handle_access_violation(u32 addr, bool is_writing, x64_context* context) no
 		{
 			if (!g_tls_access_violation_recovered)
 			{
-				vm_log.notice("\n%s", cpu->dump_all());
+				vm_log.notice("\n%s", dump_useful_thread_info());
 				vm_log.error("Access violation %s location 0x%x (%s) [type=u%u]", is_writing ? "writing" : "reading", addr, (is_writing && vm::check_addr(addr)) ? "read-only memory" : "unmapped memory", d_size * 8);
 			}
 
@@ -1560,9 +1587,9 @@ bool handle_access_violation(u32 addr, bool is_writing, x64_context* context) no
 
 	Emu.Pause();
 
-	if (cpu && !g_tls_access_violation_recovered)
+	if (!g_tls_access_violation_recovered)
 	{
-		vm_log.notice("\n%s", cpu->dump_all());
+		vm_log.notice("\n%s", dump_useful_thread_info());
 	}
 
 	// Note: a thread may access violate more than once after hack_alloc recovery
@@ -1647,10 +1674,7 @@ static LONG exception_filter(PEXCEPTION_POINTERS pExp) noexcept
 	{
 		fmt::append(msg, "Emu Thread Name: '%s'.\n", thread_ctrl::get_name());
 
-		if (const auto cpu = get_current_cpu_thread())
-		{
-			sys_log.notice("\n%s", cpu->dump_all());
-		}
+		sys_log.notice("\n%s", dump_useful_thread_info());
 	}
 
 	// TODO: Report full thread name if not an emu thread
@@ -1775,16 +1799,12 @@ static void signal_handler(int sig, siginfo_t* info, void* uct) noexcept
 		}
 	}
 
-	if (const auto cpu = get_current_cpu_thread())
-	{
-		sys_log.notice("\n%s", cpu->dump_all());
-	}
-
 	std::string msg = fmt::format("Segfault %s location %p at %p.\n", cause, info->si_addr, RIP(context));
 
 	if (thread_ctrl::get_current())
 	{
 		fmt::append(msg, "Emu Thread Name: '%s'.\n", thread_ctrl::get_name());
+		sys_log.notice("\n%s", dump_useful_thread_info());
 	}
 
 	// TODO: Report full thread name if not an emu thread
@@ -2027,11 +2047,11 @@ u64 thread_base::finalize(thread_state result_state) noexcept
 	const u64 _self = m_thread;
 
 	// Set result state (errored or finalized)
-	const bool ok = 0 == (3 & ~m_sync.fetch_op([&](u64& v)
+	m_sync.fetch_op([&](u64& v)
 	{
 		v &= -4;
 		v |= static_cast<u32>(result_state);
-	}));
+	});
 
 	// Signal waiting threads
 	m_sync.notify_all(2);
@@ -2069,7 +2089,7 @@ thread_base::native_entry thread_base::finalize(u64 _self) noexcept
 		{
 			s_pool_ctr |= s_stop_bit;
 
-			while (u64 remains = s_pool_ctr & ~s_stop_bit)
+			while (/*u64 remains = */s_pool_ctr & ~s_stop_bit)
 			{
 				for (u32 i = 0; i < std::size(s_thread_pool); i++)
 				{
@@ -2391,6 +2411,11 @@ u64 thread_base::get_cycles()
 
 [[noreturn]] void thread_ctrl::emergency_exit(std::string_view reason)
 {
+	if (std::string info = dump_useful_thread_info(); !info.empty())
+	{
+		sys_log.notice("\%s", info);
+	}
+
 	sig_log.fatal("Thread terminated due to fatal error: %s", reason);
 
 	std::fprintf(stderr, "Thread '%s' terminated due to fatal error: %s\n", g_tls_log_prefix().c_str(), std::string(reason).c_str());

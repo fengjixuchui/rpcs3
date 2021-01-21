@@ -19,13 +19,30 @@ usz curl_write_cb_compat(char* ptr, usz /*size*/, usz nmemb, void* userdata)
 downloader::downloader(QWidget* parent)
 	: QObject(parent)
 	, m_parent(parent)
+	, m_curl(new curl_handle(this))
 {
-	m_curl = new curl_handle(this);
+}
+
+downloader::~downloader()
+{
+	if (m_thread && m_thread->isRunning())
+	{
+		m_curl_abort = true;
+		m_thread->wait();
+	}
 }
 
 void downloader::start(const std::string& url, bool follow_location, bool show_progress_dialog, const QString& progress_dialog_title, bool keep_progress_dialog_open, int exptected_size)
 {
-	connect(this, &downloader::signal_buffer_update, this, &downloader::handle_buffer_update);
+	if (m_thread)
+	{
+		if (m_thread->isRunning())
+		{
+			m_curl_abort = true;
+			m_thread->wait();
+		}
+		m_thread->deleteLater();
+	}
 
 	m_keep_progress_dialog_open = keep_progress_dialog_open;
 	m_curl_buf.clear();
@@ -36,7 +53,7 @@ void downloader::start(const std::string& url, bool follow_location, bool show_p
 	curl_easy_setopt(m_curl->get_curl(), CURLOPT_WRITEDATA, this);
 	curl_easy_setopt(m_curl->get_curl(), CURLOPT_FOLLOWLOCATION, follow_location ? 1 : 0);
 
-	const auto thread = QThread::create([this]
+	m_thread = QThread::create([this]
 	{
 		const auto result = curl_easy_perform(m_curl->get_curl());
 		m_curl_success = result == CURLE_OK;
@@ -49,7 +66,7 @@ void downloader::start(const std::string& url, bool follow_location, bool show_p
 		}
 	});
 
-	connect(thread, &QThread::finished, this, [this]()
+	connect(m_thread, &QThread::finished, this, [this]()
 	{
 		if (m_curl_abort)
 		{
@@ -67,6 +84,10 @@ void downloader::start(const std::string& url, bool follow_location, bool show_p
 			Q_EMIT signal_download_finished(m_curl_buf);
 		}
 	});
+
+	// The downloader's signals are expected to be disconnected and customized before start is called.
+	// Therefore we need to (re)connect its signal(s) here and not in the constructor.
+	connect(this, &downloader::signal_buffer_update, this, &downloader::handle_buffer_update);
 
 	if (show_progress_dialog)
 	{
@@ -95,8 +116,8 @@ void downloader::start(const std::string& url, bool follow_location, bool show_p
 		}
 	}
 
-	thread->setObjectName("Compat Update");
-	thread->start();
+	m_thread->setObjectName("Download Thread");
+	m_thread->start();
 }
 
 void downloader::update_progress_dialog(const QString& title)

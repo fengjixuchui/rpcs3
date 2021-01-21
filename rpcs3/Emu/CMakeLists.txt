@@ -122,9 +122,12 @@ if(USE_PULSE AND PULSE_FOUND)
 	target_link_libraries(rpcs3_emu PUBLIC 3rdparty::pulse)
 endif()
 
-if(USE_FAUDIO AND SDL2_FOUND AND NOT SDL2_VERSION VERSION_LESS 2.0.9)
-	target_sources(rpcs3_emu PRIVATE Audio/FAudio/FAudioBackend.cpp)
-	target_link_libraries(rpcs3_emu PUBLIC 3rdparty::faudio)
+if(USE_FAUDIO)
+	find_package(SDL2)
+	if(SDL2_FOUND AND NOT SDL2_VERSION VERSION_LESS 2.0.9)
+		target_sources(rpcs3_emu PRIVATE Audio/FAudio/FAudioBackend.cpp)
+		target_link_libraries(rpcs3_emu PUBLIC 3rdparty::faudio)
+	endif()
 endif()
 
 if(WIN32)
@@ -435,11 +438,17 @@ target_sources(rpcs3_emu PRIVATE
 
 if(TARGET 3rdparty_vulkan)
 	target_sources(rpcs3_emu PRIVATE
+		RSX/VK/vkutils/barriers.cpp
+		RSX/VK/vkutils/buffer_object.cpp
 		RSX/VK/vkutils/chip_class.cpp
-		RSX/VK/vkutils/fence.cpp
-		RSX/VK/vkutils/mem_allocator.cpp
-		RSX/VK/vkutils/memory_block.cpp
-		RSX/VK/vkutils/physical_device.cpp
+		RSX/VK/vkutils/commands.cpp
+		RSX/VK/vkutils/data_heap.cpp
+		RSX/VK/vkutils/image.cpp
+		RSX/VK/vkutils/image_helpers.cpp
+		RSX/VK/vkutils/scratch.cpp
+		RSX/VK/vkutils/sync.cpp
+		RSX/VK/vkutils/memory.cpp
+		RSX/VK/vkutils/device.cpp
 		RSX/VK/vkutils/sampler.cpp
 		RSX/VK/vkutils/shared.cpp
 		RSX/VK/VKCommandStream.cpp

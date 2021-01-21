@@ -296,6 +296,10 @@ namespace fmt
 			static constexpr fmt_type_info type_list[sizeof...(Args) + 1]{fmt_type_info::make<fmt_unveil_t<Args>>()...};
 			raw_throw_exception({line, col, file, func}, reinterpret_cast<const char*>(fmt), type_list, fmt_args_t<Args...>{fmt_unveil<Args>::get(args)...});
 		}
+
+#ifndef _MSC_VER
+		[[noreturn]] ~throw_exception();
+#endif
 	};
 
 	template <typename CharT, usz N, typename... Args>

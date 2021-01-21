@@ -258,7 +258,7 @@ thread_local cpu_thread* g_tls_current_cpu_thread = nullptr;
 static atomic_t<u64, 64> s_cpu_counter{0};
 
 // List of posted tasks for suspend_all
-static atomic_t<cpu_thread::suspend_work*> s_cpu_work[128]{};
+//static atomic_t<cpu_thread::suspend_work*> s_cpu_work[128]{};
 
 // Linked list of pushed tasks for suspend_all
 static atomic_t<cpu_thread::suspend_work*> s_pushed{};
@@ -531,7 +531,7 @@ void cpu_thread::operator()()
 		{
 			if (_this)
 			{
-				sys_log.warning("CPU Thread '%s' terminated abnormally:\n%s", name, _this->dump_all());
+				sys_log.warning("CPU Thread '%s' terminated abnormally!", name);
 				cleanup();
 			}
 		}

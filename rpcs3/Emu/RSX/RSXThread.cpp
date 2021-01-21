@@ -10,6 +10,7 @@
 #include "Capture/rsx_capture.h"
 #include "rsx_methods.h"
 #include "rsx_utils.h"
+#include "gcm_printing.h"
 #include "Emu/Cell/lv2/sys_event.h"
 #include "Emu/Cell/Modules/cellGcmSys.h"
 #include "Overlays/overlay_perf_metrics.h"
@@ -99,10 +100,24 @@ namespace rsx
 
 		// They are handled elsewhere for targeted methods, so it's unexpected for them to be passed here
 		case CELL_GCM_CONTEXT_DMA_TO_MEMORY_GET_NOTIFY0:
-			msg = "CELL_GCM_CONTEXT_DMA_TO_MEMORY_GET_NOTIFY0"sv; break;
+		case CELL_GCM_CONTEXT_DMA_TO_MEMORY_GET_NOTIFY1:
+		case CELL_GCM_CONTEXT_DMA_TO_MEMORY_GET_NOTIFY2:
+		case CELL_GCM_CONTEXT_DMA_TO_MEMORY_GET_NOTIFY3:
+		case CELL_GCM_CONTEXT_DMA_TO_MEMORY_GET_NOTIFY4:
+		case CELL_GCM_CONTEXT_DMA_TO_MEMORY_GET_NOTIFY5:
+		case CELL_GCM_CONTEXT_DMA_TO_MEMORY_GET_NOTIFY6:
+		case CELL_GCM_CONTEXT_DMA_TO_MEMORY_GET_NOTIFY7:
+			msg = "CELL_GCM_CONTEXT_DMA_TO_MEMORY_GET_NOTIFYx"sv; break;
 
 		case CELL_GCM_CONTEXT_DMA_NOTIFY_MAIN_0:
-			msg = "CELL_GCM_CONTEXT_DMA_NOTIFY_MAIN_0"sv; break;
+		case CELL_GCM_CONTEXT_DMA_NOTIFY_MAIN_1:
+		case CELL_GCM_CONTEXT_DMA_NOTIFY_MAIN_2:
+		case CELL_GCM_CONTEXT_DMA_NOTIFY_MAIN_3:
+		case CELL_GCM_CONTEXT_DMA_NOTIFY_MAIN_4:
+		case CELL_GCM_CONTEXT_DMA_NOTIFY_MAIN_5:
+		case CELL_GCM_CONTEXT_DMA_NOTIFY_MAIN_6:
+		case CELL_GCM_CONTEXT_DMA_NOTIFY_MAIN_7:
+			msg = "CELL_GCM_CONTEXT_DMA_NOTIFY_MAIN_x"sv; break;
 
 		case CELL_GCM_CONTEXT_DMA_SEMAPHORE_RW:
 		case CELL_GCM_CONTEXT_DMA_SEMAPHORE_R:
@@ -469,7 +484,7 @@ namespace rsx
 		if (capture_current_frame)
 		{
 			u32 element_count = rsx::method_registers.current_draw_clause.get_elements_count();
-			capture_frame("Draw " + rsx::to_string(rsx::method_registers.current_draw_clause.primitive) + std::to_string(element_count));
+			capture_frame(fmt::format("Draw %s %d", rsx::method_registers.current_draw_clause.primitive, element_count));
 		}
 	}
 
@@ -523,8 +538,6 @@ namespace rsx
 
 		g_fxo->get<rsx::dma_manager>()->init();
 		on_init_thread();
-
-		method_registers.init();
 
 		if (!zcull_ctrl)
 		{
@@ -889,8 +902,8 @@ namespace rsx
 		// Force aligned indices as realhw
 		const u32 address = (0 - type_size) & get_address(rsx::method_registers.index_array_address(), rsx::method_registers.index_array_location());
 
-		const bool is_primitive_restart_enabled = rsx::method_registers.restart_index_enabled();
-		const u32 primitive_restart_index = rsx::method_registers.restart_index();
+		//const bool is_primitive_restart_enabled = rsx::method_registers.restart_index_enabled();
+		//const u32 primitive_restart_index = rsx::method_registers.restart_index();
 
 		const u32 first = draw_indexed_clause.min_index();
 		const u32 count = draw_indexed_clause.get_elements_count();
@@ -1011,8 +1024,8 @@ namespace rsx
 			return;
 		}
 
-		const u16 clip_x = rsx::method_registers.surface_clip_origin_x();
-		const u16 clip_y = rsx::method_registers.surface_clip_origin_y();
+		//const u16 clip_x = rsx::method_registers.surface_clip_origin_x();
+		//const u16 clip_y = rsx::method_registers.surface_clip_origin_y();
 
 		layout.color_addresses = get_color_surface_addresses();
 		layout.zeta_address = get_zeta_surface_address();
@@ -1857,7 +1870,7 @@ namespace rsx
 					texture_control |= (1 << texture_control_bits::ALPHAKILL);
 				}
 
-				const u32 texaddr = rsx::get_address(tex.offset(), tex.location());
+				//const u32 texaddr = rsx::get_address(tex.offset(), tex.location());
 				const u32 raw_format = tex.format();
 				const u32 format = raw_format & ~(CELL_GCM_TEXTURE_LN | CELL_GCM_TEXTURE_UN);
 
@@ -2018,11 +2031,13 @@ namespace rsx
 
 	void thread::init(u32 ctrlAddress)
 	{
+		method_registers.init();
+
 		dma_address = ctrlAddress;
 		ctrl = vm::_ptr<RsxDmaControl>(ctrlAddress);
 		flip_status = CELL_GCM_DISPLAY_FLIP_STATUS_DONE;
 
-		memset(display_buffers, 0, sizeof(display_buffers));
+		std::memset(display_buffers, 0, sizeof(display_buffers));
 
 		on_init_rsx();
 		m_rsx_thread_exiting = false;
@@ -2565,6 +2580,18 @@ namespace rsx
 		recovered_fifo_cmds_history.push({fifo_ctrl->last_cmd(), current_time});
 	}
 
+	std::vector<std::pair<u32, u32>> thread::dump_callstack() const
+	{
+		std::vector<std::pair<u32, u32>> result;
+
+		if (u32 addr = fifo_ret_addr; addr != RSX_CALL_STACK_EMPTY)
+		{
+			result.emplace_back(addr, 0);
+		}
+
+		return result;
+	}
+
 	void thread::fifo_wake_delay(u64 div)
 	{
 		// TODO: Nanoseconds accuracy
@@ -2624,6 +2651,48 @@ namespace rsx
 	{
 		// Last fifo cmd for logging and utility
 		return fifo_ctrl->last_cmd();
+	}
+
+	void invalid_method(thread*, u32, u32);
+
+	std::string thread::dump_regs() const
+	{
+		std::string result;
+
+		for (u32 i = 0; i < 1 << 14; i++)
+		{
+			if (rsx::methods[i] == &invalid_method)
+			{
+				continue;
+			}
+
+			switch (i)
+			{
+			case NV4097_NO_OPERATION:
+			case NV4097_INVALIDATE_L2:
+			case NV4097_INVALIDATE_VERTEX_FILE:
+			case NV4097_INVALIDATE_VERTEX_CACHE_FILE:
+			case NV4097_INVALIDATE_ZCULL:
+			case NV4097_WAIT_FOR_IDLE:
+			case NV4097_PM_TRIGGER:
+			case NV4097_ZCULL_SYNC:
+				continue;
+
+			default:
+			{
+				if (i >= NV308A_COLOR && i < NV3089_SET_OBJECT)
+				{
+					continue;
+				}
+
+				break;
+			}
+			}
+
+			fmt::append(result, "[%04x] %s\n", i, ensure(rsx::get_pretty_printing_function(i))(i, method_registers.registers[i]));
+		}
+
+		return result;
 	}
 
 	flags32_t thread::read_barrier(u32 memory_address, u32 memory_range, bool unconditional)

@@ -590,7 +590,7 @@ namespace rsx
 
 					// Sanity checks
 					AUDIT(exclusion_range.is_page_range());
-					AUDIT(data.cause.is_read() && !excluded->is_flushable() || data.cause.skip_fbos() || !exclusion_range.overlaps(data.fault_range));
+					AUDIT((data.cause.is_read() && !excluded->is_flushable()) || data.cause.skip_fbos() || !exclusion_range.overlaps(data.fault_range));
 
 					// Apply exclusion
 					ranges_to_unprotect.exclude(exclusion_range);
@@ -932,7 +932,7 @@ namespace rsx
 				else
 				{
 					// This is a read and all overlapping sections were RO and were excluded (except for cause == superseded_by_fbo)
-					AUDIT(cause.skip_fbos() || cause.is_read() && !result.sections_to_exclude.empty());
+					AUDIT(cause.skip_fbos() || (cause.is_read() && !result.sections_to_exclude.empty()));
 
 					// We did not handle this violation
 					result.clear_sections();
@@ -2656,7 +2656,7 @@ namespace rsx
 				typeless_info.src_context = texture_upload_context::framebuffer_storage;
 			}
 
-			const auto src_is_depth_format = helpers::is_gcm_depth_format(typeless_info.src_gcm_format);
+			//const auto src_is_depth_format = helpers::is_gcm_depth_format(typeless_info.src_gcm_format);
 			const auto preferred_dst_format = helpers::get_sized_blit_format(dst_is_argb8, false, is_format_convert);
 
 			if (cached_dest && !use_null_region)

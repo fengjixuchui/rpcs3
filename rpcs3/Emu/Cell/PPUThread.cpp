@@ -126,11 +126,16 @@ static u64& ppu_ref(u32 addr)
 // Get interpreter cache value
 static u64 ppu_cache(u32 addr)
 {
+	if (g_cfg.core.ppu_decoder > ppu_decoder_type::fast)
+	{
+		fmt::throw_exception("Invalid PPU decoder");
+	}
+
 	// Select opcode table
 	const auto& table = *(
-		g_cfg.core.ppu_decoder == ppu_decoder_type::precise ? &g_ppu_interpreter_precise.get_table() :
-		g_cfg.core.ppu_decoder == ppu_decoder_type::fast ? &g_ppu_interpreter_fast.get_table() :
-		(fmt::throw_exception("Invalid PPU decoder"), nullptr));
+		g_cfg.core.ppu_decoder == ppu_decoder_type::precise
+		? &g_ppu_interpreter_precise.get_table()
+		: &g_ppu_interpreter_fast.get_table());
 
 	return reinterpret_cast<uptr>(table[ppu_decode(vm::read32(addr))]);
 }
@@ -910,7 +915,7 @@ void ppu_thread::exec_task()
 ppu_thread::~ppu_thread()
 {
 	// Deallocate Stack Area
-	vm::dealloc_verbose_nothrow(stack_addr, vm::stack);
+	ensure(vm::dealloc(stack_addr, vm::stack));
 
 	if (const auto dct = g_fxo->get<lv2_memory_container>())
 	{
@@ -1817,7 +1822,7 @@ static bool ppu_store_reservation(ppu_thread& ppu, u32 addr, u64 reg_value)
 			addr &= -128;
 
 			// Cache line data
-			auto& cline_data = vm::_ref<spu_rdata_t>(addr);
+			//auto& cline_data = vm::_ref<spu_rdata_t>(addr);
 
 			data += 0;
 			rsx::reservation_lock rsx_lock(addr, 128);
@@ -2015,7 +2020,7 @@ extern void ppu_initialize(const ppu_module& info)
 
 		for (u64 index = 0; index < 1024; index++)
 		{
-			if (auto sc = ppu_get_syscall(index))
+			if (ppu_get_syscall(index))
 			{
 				link_table.emplace(fmt::format("%s", ppu_syscall_code(index)), reinterpret_cast<u64>(ppu_execute_syscall));
 				link_table.emplace(fmt::format("syscall_%u", index), reinterpret_cast<u64>(ppu_execute_syscall));

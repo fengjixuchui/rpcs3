@@ -2,6 +2,8 @@
 #include "VKFragmentProgram.h"
 #include "VKCommonDecompiler.h"
 #include "VKHelpers.h"
+#include "vkutils/device.h"
+#include "Emu/system_config.h"
 #include "../Common/GLSLCommon.h"
 #include "../GCM.h"
 
@@ -132,10 +134,14 @@ void VKFragmentDecompilerThread::insertConstants(std::stringstream & OS)
 
 			if (properties.shadow_sampler_mask & mask)
 			{
-				if (properties.tex2d_sampler_mask & mask)
+				if (properties.common_access_sampler_mask & mask)
+				{
 					rsx_log.error("Texture unit %d is sampled as both a shadow texture and a depth texture", index);
+				}
 				else
-					samplerType = "sampler2DShadow";
+				{
+					samplerType += "Shadow";
+				}
 			}
 
 			vk::glsl::program_input in;
@@ -369,7 +375,7 @@ void VKFragmentDecompilerThread::insertMainEnd(std::stringstream & OS)
 
 void VKFragmentDecompilerThread::Task()
 {
-	m_binding_table = vk::get_current_renderer()->get_pipeline_binding_table();
+	m_binding_table = vk::g_render_device->get_pipeline_binding_table();
 	m_shader = Decompile();
 	vk_prog->SetInputs(inputs);
 }
