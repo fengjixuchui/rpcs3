@@ -188,7 +188,7 @@ void audio_ringbuffer::enqueue(const float* in_buffer)
 	const bool success = backend->AddData(buf, AUDIO_BUFFER_SAMPLES * cfg.audio_channels);
 	if (!success)
 	{
-		cellAudio.error("Could not enqueue buffer onto audio backend. Attempting to recover...");
+		cellAudio.warning("Could not enqueue buffer onto audio backend. Attempting to recover...");
 		flush();
 		return;
 	}
@@ -600,7 +600,7 @@ void cell_audio_thread::update_config()
 
 void cell_audio_thread::operator()()
 {
-	thread_ctrl::set_native_priority(1);
+	thread_ctrl::scoped_priority high_prio(+1);
 
 	// Allocate ringbuffer
 	ringbuffer.reset(new audio_ringbuffer(cfg));
@@ -971,6 +971,7 @@ void cell_audio_thread::mix(float *out_buffer, s32 offset)
 					const float left       = buf[in + 0] * m;
 					const float right      = buf[in + 1] * m;
 					const float center     = buf[in + 2] * m;
+					[[maybe_unused]]
 					const float low_freq   = buf[in + 3] * m;
 					const float rear_left  = buf[in + 4] * m;
 					const float rear_right = buf[in + 5] * m;

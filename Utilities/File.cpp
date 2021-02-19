@@ -7,7 +7,6 @@
 #include <algorithm>
 #include <cstring>
 #include <cerrno>
-#include <typeinfo>
 #include <map>
 
 #include "util/asm.hpp"
@@ -228,7 +227,7 @@ namespace fs
 
 	stat_t file_base::stat()
 	{
-		fmt::throw_exception("fs::file::stat() not supported for %s", typeid(*this).name());
+		fmt::throw_exception("fs::file::stat() not supported.");
 	}
 
 	void file_base::sync()
@@ -323,12 +322,53 @@ std::shared_ptr<fs::device_base> fs::set_virtual_device(const std::string& name,
 
 std::string fs::get_parent_dir(const std::string& path)
 {
-	// Get (basically) processed path
-	const auto real_path = fs::escape_path(path);
+	std::string_view result = path;
 
-	const auto pos = real_path.find_last_of(delim);
+	// Number of path components to remove
+	usz to_remove = 1;
 
-	return real_path.substr(0, pos == umax ? 0 : pos);
+	while (to_remove--)
+	{
+		// Trim contiguous delimiters at the end
+		if (usz sz = result.find_last_not_of(delim) + 1)
+		{
+			result = result.substr(0, sz);
+		}
+		else
+		{
+			return "/";
+		}
+
+		const auto elem = result.substr(result.find_last_of(delim) + 1);
+
+		if (elem.empty() || elem.size() == result.size())
+		{
+			break;
+		}
+
+		if (elem == ".")
+		{
+			to_remove += 1;
+		}
+
+		if (elem == "..")
+		{
+			to_remove += 2;
+		}
+
+		result.remove_suffix(elem.size());
+	}
+
+	if (usz sz = result.find_last_not_of(delim) + 1)
+	{
+		result = result.substr(0, sz);
+	}
+	else
+	{
+		return "/";
+	}
+
+	return std::string{result};
 }
 
 bool fs::stat(const std::string& path, stat_t& info)
@@ -1100,13 +1140,22 @@ fs::file::file(const std::string& path, bs_t<open_mode> mode)
 
 	if (mode & fs::append) flags |= O_APPEND;
 	if (mode & fs::create) flags |= O_CREAT;
-	if (mode & fs::trunc && !(mode & (fs::lock + fs::unread))) flags |= O_TRUNC;
+	if (mode & fs::trunc && !(mode & fs::lock)) flags |= O_TRUNC;
 	if (mode & fs::excl) flags |= O_EXCL;
 
 	int perm = S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH;
 
 	if (mode & fs::write && mode & fs::unread)
 	{
+		if (!(mode & (fs::excl + fs::lock)) && mode & fs::trunc)
+		{
+			// Alternative to truncation for "unread" flag (TODO)
+			if (mode & fs::create)
+			{
+				::unlink(path.c_str());
+			}
+		}
+
 		perm = 0;
 	}
 
@@ -1118,14 +1167,14 @@ fs::file::file(const std::string& path, bs_t<open_mode> mode)
 		return;
 	}
 
-	if (mode & fs::write && mode & (fs::lock + fs::unread) && ::flock(fd, LOCK_EX | LOCK_NB) != 0)
+	if (mode & fs::write && mode & fs::lock && ::flock(fd, LOCK_EX | LOCK_NB) != 0)
 	{
 		g_tls_error = errno == EWOULDBLOCK ? fs::error::acces : to_error(errno);
 		::close(fd);
 		return;
 	}
 
-	if (mode & fs::trunc && mode & (fs::lock + fs::unread) && mode & fs::write)
+	if (mode & fs::trunc && mode & fs::lock && mode & fs::write)
 	{
 		// Postpone truncation in order to avoid using O_TRUNC on a locked file
 		ensure(::ftruncate(fd, 0) == 0);

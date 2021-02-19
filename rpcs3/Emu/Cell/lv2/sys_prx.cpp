@@ -17,7 +17,8 @@
 
 extern std::shared_ptr<lv2_prx> ppu_load_prx(const ppu_prx_object&, const std::string&);
 extern void ppu_unload_prx(const lv2_prx& prx);
-extern void ppu_initialize(const ppu_module&);
+extern bool ppu_initialize(const ppu_module&, bool = false);
+extern void ppu_finalize(const ppu_module&);
 
 LOG_CHANNEL(sys_prx);
 
@@ -265,7 +266,7 @@ static error_code prx_load_module(const std::string& vpath, u64 flags, vm::ptr<s
 
 	u128 klic = g_fxo->get<loaded_npdrm_keys>()->devKlic.load();
 
-	const ppu_prx_object obj = decrypt_self(std::move(src), reinterpret_cast<u8*>(&klic));
+	ppu_prx_object obj = decrypt_self(std::move(src), reinterpret_cast<u8*>(&klic));
 
 	if (obj != elf_error::ok)
 	{
@@ -273,6 +274,8 @@ static error_code prx_load_module(const std::string& vpath, u64 flags, vm::ptr<s
 	}
 
 	const auto prx = ppu_load_prx(obj, path);
+
+	obj.clear();
 
 	if (!prx)
 	{
@@ -589,6 +592,8 @@ error_code _sys_prx_unload_module(ppu_thread& ppu, u32 id, u64 flags, vm::ptr<sy
 	}
 
 	ppu_unload_prx(*prx);
+
+	ppu_finalize(*prx);
 
 	//s32 result = prx->exit ? prx->exit() : CELL_OK;
 

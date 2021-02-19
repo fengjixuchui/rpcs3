@@ -421,7 +421,7 @@ logs::file_writer::file_writer(const std::string& name, u64 max_size)
 
 	m_writer = std::thread([this]()
 	{
-		thread_ctrl::set_native_priority(-1);
+		thread_ctrl::scoped_priority low_prio(-1);
 
 		while (true)
 		{
@@ -550,7 +550,7 @@ void logs::file_writer::log(const char* text, usz size)
 	// TODO: write bigger fragment directly in blocking manner
 	while (size && size <= 0xffffff)
 	{
-		u64 bufv;
+		u64 bufv = 0;
 
 		const auto pos = m_buf.atomic_op([&](u64& v) -> uchar*
 		{

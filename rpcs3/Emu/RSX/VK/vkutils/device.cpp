@@ -56,8 +56,9 @@ namespace vk
 
 		stencil_export_support           = device_extensions.is_supported(VK_EXT_SHADER_STENCIL_EXPORT_EXTENSION_NAME);
 		conditional_render_support       = device_extensions.is_supported(VK_EXT_CONDITIONAL_RENDERING_EXTENSION_NAME);
-		external_memory_host_support = device_extensions.is_supported(VK_EXT_EXTERNAL_MEMORY_HOST_EXTENSION_NAME);
+		external_memory_host_support     = device_extensions.is_supported(VK_EXT_EXTERNAL_MEMORY_HOST_EXTENSION_NAME);
 		unrestricted_depth_range_support = device_extensions.is_supported(VK_EXT_DEPTH_RANGE_UNRESTRICTED_EXTENSION_NAME);
+		surface_capabilities_2_support   = instance_extensions.is_supported(VK_KHR_GET_PHYSICAL_DEVICE_PROPERTIES_2_EXTENSION_NAME);
 	}
 
 	void physical_device::create(VkInstance context, VkPhysicalDevice pdev, bool allow_extensions)
@@ -229,6 +230,7 @@ namespace vk
 	// Render Device - The actual usable device
 	void render_device::create(vk::physical_device& pdev, u32 graphics_queue_idx)
 	{
+		std::string message_on_error;
 		float queue_priorities[1] = { 0.f };
 		pgpu = &pdev;
 
@@ -287,6 +289,7 @@ namespace vk
 				// TODO: Slow fallback to emulate this
 				// Just warn and let the driver decide whether to crash or not
 				rsx_log.fatal("Your GPU driver does not support some required MSAA features. Expect problems.");
+				message_on_error += "Your GPU driver does not support some required MSAA features.\nTry updating your GPU driver or disable Anti-Aliasing in the settings.";
 			}
 
 			enabled_features.sampleRateShading = VK_TRUE;
@@ -303,6 +306,31 @@ namespace vk
 		enabled_features.samplerAnisotropy = VK_TRUE;
 		enabled_features.textureCompressionBC = VK_TRUE;
 		enabled_features.shaderStorageBufferArrayDynamicIndexing = VK_TRUE;
+
+		// If we're on lavapipe / llvmpipe, disable unimplemented features:
+		// - samplerAnisotropy
+		// - shaderStorageBufferArrayDynamicIndexing
+		// - wideLines
+		// as of mesa 21.1.0-dev (aea36ee05e9, 2020-02-10)
+		// Several games work even if we disable these, testing purpose only
+		if (pgpu->get_name().find("llvmpipe") != umax)
+		{
+			if (!pgpu->features.samplerAnisotropy)
+			{
+				rsx_log.error("Running lavapipe without support for samplerAnisotropy");
+				enabled_features.samplerAnisotropy = VK_FALSE;
+			}
+			if (!pgpu->features.shaderStorageBufferArrayDynamicIndexing)
+			{
+				rsx_log.error("Running lavapipe without support for shaderStorageBufferArrayDynamicIndexing");
+				enabled_features.shaderStorageBufferArrayDynamicIndexing = VK_FALSE;
+			}
+			if (!pgpu->features.wideLines)
+			{
+				rsx_log.error("Running lavapipe without support for wideLines");
+				enabled_features.wideLines = VK_FALSE;
+			}
+		}
 
 		// Optionally disable unsupported stuff
 		if (!pgpu->features.shaderFloat64)
@@ -356,7 +384,7 @@ namespace vk
 			rsx_log.notice("GPU/driver lacks support for float16 data types. All float16_t arithmetic will be emulated with float32_t.");
 		}
 
-		CHECK_RESULT(vkCreateDevice(*pgpu, &device, nullptr, &dev));
+		CHECK_RESULT_EX(vkCreateDevice(*pgpu, &device, nullptr, &dev), message_on_error);
 
 		// Import optional function endpoints
 		if (pgpu->conditional_render_support)
@@ -488,6 +516,11 @@ namespace vk
 	bool render_device::get_external_memory_host_support() const
 	{
 		return pgpu->external_memory_host_support;
+	}
+
+	bool render_device::get_surface_capabilities_2_support() const
+	{
+		return pgpu->surface_capabilities_2_support;
 	}
 
 	mem_allocator_base* render_device::get_allocator() const

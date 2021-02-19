@@ -77,25 +77,20 @@ namespace rsx
 			u64 start = get_system_time();
 			while (sema != arg)
 			{
-				if (Emu.IsStopped())
-					return;
-
-				// Wait for external pause events
-				if (rsx->external_interrupt_lock)
+				if (rsx->is_stopped())
 				{
-					rsx->wait_pause();
-					continue;
+					return;
 				}
 
 				if (const auto tdr = static_cast<u64>(g_cfg.video.driver_recovery_timeout))
 				{
-					if (Emu.IsPaused())
+					if (rsx->is_paused())
 					{
 						const u64 start0 = get_system_time();
 
-						while (Emu.IsPaused())
+						while (rsx->is_paused())
 						{
-							std::this_thread::sleep_for(1ms);
+							rsx->cpu_wait({});
 						}
 
 						// Reset
@@ -112,8 +107,7 @@ namespace rsx
 					}
 				}
 
-				rsx->on_semaphore_acquire_wait();
-				std::this_thread::yield();
+				rsx->cpu_wait({});
 			}
 
 			rsx->fifo_wake_delay();
@@ -1075,7 +1069,7 @@ namespace rsx
 			u32 dst_dma = 0;
 			rsx::blit_engine::transfer_destination_format dst_color_format;
 			u32 out_pitch = 0;
-			u32 out_alignment = 64;
+			[[maybe_unused]] u32 out_alignment = 64;
 			bool is_block_transfer = false;
 
 			switch (method_registers.blit_engine_context_surface())
@@ -1614,7 +1608,8 @@ namespace rsx
 				{ ppu_cmd::sleep, 0 }
 			});
 
-			thread_ctrl::notify(*rsx->intr_thread);
+			rsx->intr_thread->cmd_notify++;
+			rsx->intr_thread->cmd_notify.notify_one();
 		}
 	}
 

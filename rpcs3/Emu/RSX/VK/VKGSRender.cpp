@@ -657,15 +657,18 @@ bool VKGSRender::on_access_violation(u32 address, bool is_writing)
 		std::lock_guard lock(m_secondary_cb_guard);
 
 		const rsx::invalidation_cause cause = is_writing ? rsx::invalidation_cause::deferred_write : rsx::invalidation_cause::deferred_read;
-		result = std::move(m_texture_cache.invalidate_address(m_secondary_command_buffer, address, cause));
+		result = m_texture_cache.invalidate_address(m_secondary_command_buffer, address, cause);
 	}
 
-	if (!result.violation_handled)
-		return false;
-
+	if (result.invalidate_samplers)
 	{
 		std::lock_guard lock(m_sampler_mutex);
 		m_samplers_dirty.store(true);
+	}
+
+	if (!result.violation_handled)
+	{
+		return false;
 	}
 
 	if (result.num_flushable > 0)
@@ -735,7 +738,7 @@ void VKGSRender::on_invalidate_memory_range(const utils::address_range &range, r
 {
 	std::lock_guard lock(m_secondary_cb_guard);
 
-	auto data = std::move(m_texture_cache.invalidate_range(m_secondary_command_buffer, range, cause));
+	auto data = m_texture_cache.invalidate_range(m_secondary_command_buffer, range, cause);
 	AUDIT(data.empty());
 
 	if (cause == rsx::invalidation_cause::unmap)
@@ -817,7 +820,7 @@ void VKGSRender::check_heap_status(u32 flags)
 			m_index_buffer_ring_info.is_critical() ||
 			m_raster_env_ring_info.is_critical();
 	}
-	else if (flags)
+	else
 	{
 		heap_critical = false;
 		u32 test = 1u << std::countr_zero(flags);
@@ -2231,6 +2234,12 @@ void VKGSRender::renderctl(u32 request_code, void* args)
 		auto packet = reinterpret_cast<vk::submit_packet*>(args);
 		vk::queue_submit(packet->queue, &packet->submit_info, packet->pfence, VK_TRUE);
 		free(packet);
+		break;
+	}
+	case vk::rctrl_run_gc:
+	{
+		auto eid = reinterpret_cast<u64>(args);
+		vk::on_event_completed(eid, true);
 		break;
 	}
 	default:

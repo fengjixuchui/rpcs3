@@ -1218,18 +1218,6 @@ spu_imm_table_t::spu_imm_table_t()
 	}
 }
 
-std::string spu_thread::dump_all() const
-{
-	std::string ret = cpu_thread::dump_misc();
-	ret += '\n';
-	ret += dump_misc();
-	ret += '\n';
-	ret += dump_regs();
-	ret += '\n';
-
-	return ret;
-}
-
 std::string spu_thread::dump_regs() const
 {
 	std::string ret;
@@ -1289,7 +1277,7 @@ std::string spu_thread::dump_regs() const
 
 		if (i3 >= 0x80 && is_exec_code(i3))
 		{
-			SPUDisAsm dis_asm(CPUDisAsm_NormalMode, ls);
+			SPUDisAsm dis_asm(cpu_disasm_mode::normal, ls);
 			dis_asm.disasm(i3);
 			fmt::append(ret, " -> %s", dis_asm.last_opcode);
 		}
@@ -1332,7 +1320,7 @@ std::string spu_thread::dump_regs() const
 	fmt::append(ret, "Reservation Data:\n");
 
 	be_t<u32> data[32]{};
-	std::memcpy(data, rdata, sizeof(rdata)); // Show the data even if the reservation was lost inside the atomic loop 
+	std::memcpy(data, rdata, sizeof(rdata)); // Show the data even if the reservation was lost inside the atomic loop
 
 	for (usz i = 0; i < std::size(data); i += 4)
 	{
@@ -1700,26 +1688,18 @@ void spu_thread::cleanup()
 	}
 
 	// Free range lock (and signals cleanup was called to the destructor)
-	vm::free_range_lock(std::exchange(range_lock, nullptr));
+	vm::free_range_lock(range_lock);
+
+	// Signal the debugger about the termination
+	state += cpu_flag::exit;
 }
 
 spu_thread::~spu_thread()
 {
-	{
-		vm::writer_lock lock(0);
-
-		for (s32 i = -1; i < 2; i++)
-		{
-			// Unmap LS mirrors
-			shm->unmap_critical(ls + (i * SPU_LS_SIZE));
-		}
-	}
-
-	// Release LS mirrors area
-	utils::memory_release(ls - (SPU_LS_SIZE * 2), SPU_LS_SIZE * 5);
-
-	// Free range lock if not freed already
-	if (range_lock) vm::free_range_lock(range_lock);
+	// Unmap LS and its mirrors
+	shm->unmap(ls + SPU_LS_SIZE);
+	shm->unmap(ls);
+	shm->unmap(ls - SPU_LS_SIZE);
 
 	perf_log.notice("Perf stats for transactions: success %u, failure %u", stx, ftx);
 	perf_log.notice("Perf stats for PUTLLC reload: successs %u, failure %u", last_succ, last_fail);
@@ -1741,19 +1721,39 @@ spu_thread::spu_thread(lv2_spu_group* group, u32 index, std::string_view name, u
 			ensure(vm::get(vm::spu)->falloc(SPU_FAKE_BASE_ADDR + SPU_LS_SIZE * (cpu_thread::id & 0xffffff), SPU_LS_SIZE, &shm, 0x1000));
 		}
 
-		vm::writer_lock lock(0);
+		// Try to guess free area
+		const auto start = vm::g_free_addr + SPU_LS_SIZE * (cpu_thread::id & 0xffffff) * 12;
 
-		const auto addr = static_cast<u8*>(utils::memory_reserve(SPU_LS_SIZE * 5));
+		u32 total = 0;
 
-		for (u32 i = 1; i < 4; i++)
+		// Map LS and its mirrors
+		for (u64 addr = reinterpret_cast<u64>(start); addr < 0x8000'0000'0000;)
 		{
-			// Map LS mirrors
-			const auto ptr = addr + (i * SPU_LS_SIZE);
-			ensure(shm->map_critical(ptr) == ptr);
+			if (auto ptr = shm->try_map(reinterpret_cast<u8*>(addr)))
+			{
+				if (++total == 3)
+				{
+					// Use the middle mirror
+					return ptr - SPU_LS_SIZE;
+				}
+
+				addr += SPU_LS_SIZE;
+			}
+			else
+			{
+				// Reset, cleanup and start again
+				for (u32 i = 1; i <= total; i++)
+				{
+					shm->unmap(reinterpret_cast<u8*>(addr - i * SPU_LS_SIZE));
+				}
+
+				total = 0;
+
+				addr += 0x10000;
+			}
 		}
 
-		// Use the middle mirror
-		return addr + (SPU_LS_SIZE * 2);
+		fmt::throw_exception("Failed to map SPU LS memory");
 	}())
 	, thread_type(group ? spu_type::threaded : is_isolated ? spu_type::isolated : spu_type::raw)
 	, group(group)
@@ -3070,14 +3070,14 @@ bool spu_thread::process_mfc_cmd()
 	// Stall infinitely if MFC queue is full
 	while (mfc_size >= 16) [[unlikely]]
 	{
-		state += cpu_flag::wait;
+		auto old = state.add_fetch(cpu_flag::wait);
 
-		if (is_stopped())
+		if (is_stopped(old))
 		{
 			return false;
 		}
 
-		thread_ctrl::wait();
+		thread_ctrl::wait_on(state, old);;
 	}
 
 	spu::scheduler::concurrent_execution_watchdog watchdog(*this);
@@ -3672,12 +3672,14 @@ s64 spu_thread::get_ch_value(u32 ch)
 				return out;
 			}
 
-			if (is_stopped())
+			auto old = +state;
+
+			if (is_stopped(old))
 			{
 				return -1;
 			}
 
-			thread_ctrl::wait();
+			thread_ctrl::wait_on(state, old);
 		}
 	}
 
@@ -3773,17 +3775,18 @@ s64 spu_thread::get_ch_value(u32 ch)
 
 			for (; !events.count; events = get_events(mask1, false, true))
 			{
-				if (is_paused())
+				const auto old = state.add_fetch(cpu_flag::wait);
+
+				if (is_stopped(old))
+				{
+					return -1;
+				}
+
+				if (is_paused(old))
 				{
 					// Ensure reservation data won't change while paused for debugging purposes
 					check_state();
-				}
-
-				state += cpu_flag::wait;
-
-				if (is_stopped())
-				{
-					return -1;
+					continue;
 				}
 
 				vm::reservation_notifier(raddr, 128).wait(rtime, -128, atomic_wait_timeout{100'000});
@@ -3795,19 +3798,20 @@ s64 spu_thread::get_ch_value(u32 ch)
 
 		for (; !events.count; events = get_events(mask1, true, true))
 		{
-			if (is_paused())
-			{
-				check_state();
-			}
+			const auto old = state.add_fetch(cpu_flag::wait);
 
-			state += cpu_flag::wait;
-
-			if (is_stopped())
+			if (is_stopped(old))
 			{
 				return -1;
 			}
 
-			thread_ctrl::wait_for(100);
+			if (is_paused(old))
+			{
+				check_state();
+				continue;
+			}
+
+			thread_ctrl::wait_on(state, old, 100);
 		}
 
 		check_state();
@@ -4209,7 +4213,7 @@ bool spu_thread::stop_and_signal(u32 code)
 	case 0x001:
 	{
 		state += cpu_flag::wait;
-		thread_ctrl::wait_for(1000); // hack
+		std::this_thread::sleep_for(1ms); // hack
 		check_state();
 		return true;
 	}
@@ -4260,12 +4264,14 @@ bool spu_thread::stop_and_signal(u32 code)
 				_state >= SPU_THREAD_GROUP_STATUS_WAITING && _state <= SPU_THREAD_GROUP_STATUS_WAITING_AND_SUSPENDED;
 				_state = group->run_state)
 			{
-				if (is_stopped())
+				const auto old = state.load();
+
+				if (is_stopped(old))
 				{
 					return false;
 				}
 
-				thread_ctrl::wait();
+				thread_ctrl::wait_on(state, old);;
 			}
 
 			reader_lock rlock(id_manager::g_mutex);
@@ -4337,23 +4343,21 @@ bool spu_thread::stop_and_signal(u32 code)
 			}
 		}
 
-		while (true)
+		while (auto old = state.fetch_sub(cpu_flag::signal))
 		{
-			if (is_stopped())
+			if (is_stopped(old))
 			{
 				// The thread group cannot be stopped while waiting for an event
-				ensure(!(state & cpu_flag::stop));
+				ensure(!(old & cpu_flag::stop));
 				return false;
 			}
 
-			if (!state.test_and_reset(cpu_flag::signal))
-			{
-				thread_ctrl::wait();
-			}
-			else
+			if (old & cpu_flag::signal)
 			{
 				break;
 			}
+
+			thread_ctrl::wait_on(state, old);;
 		}
 
 		std::lock_guard lock(group->mutex);
@@ -4375,7 +4379,7 @@ bool spu_thread::stop_and_signal(u32 code)
 
 				if (thread.get() != this)
 				{
-					thread_ctrl::notify(*thread);
+					thread->state.notify_one(cpu_flag::suspend);
 				}
 			}
 		}
@@ -4476,12 +4480,14 @@ bool spu_thread::stop_and_signal(u32 code)
 				_state >= SPU_THREAD_GROUP_STATUS_WAITING && _state <= SPU_THREAD_GROUP_STATUS_WAITING_AND_SUSPENDED;
 				_state = group->run_state)
 			{
-				if (is_stopped())
+				const auto old = +state;
+
+				if (is_stopped(old))
 				{
 					return false;
 				}
 
-				thread_ctrl::wait();
+				thread_ctrl::wait_on(state, old);;
 			}
 
 			std::lock_guard lock(group->mutex);
@@ -4515,12 +4521,8 @@ bool spu_thread::stop_and_signal(u32 code)
 						return true;
 					});
 
-					while (thread.get() != this && thread->state & cpu_flag::wait)
-					{
-						// TODO: replace with proper solution
-						if (atomic_wait_engine::raw_notify(nullptr, thread_ctrl::get_native_id(*thread)))
-							break;
-					}
+					if (thread.get() != this)
+						thread_ctrl::notify(*thread);
 				}
 			}
 

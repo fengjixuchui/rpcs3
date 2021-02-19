@@ -347,7 +347,7 @@ ullong utils::get_tsc_freq()
 		constexpr int samples = 40;
 		ullong rdtsc_data[samples];
 		ullong timer_data[samples];
-		ullong error_data[samples];
+		[[maybe_unused]] ullong error_data[samples];
 
 		// Narrow thread affinity to a single core
 		const u64 old_aff = thread_ctrl::get_thread_affinity_mask();
@@ -409,13 +409,18 @@ u64 utils::get_total_memory()
 
 u32 utils::get_thread_count()
 {
+	static const u32 g_count = []()
+	{
 #ifdef _WIN32
-	::SYSTEM_INFO sysInfo;
-	::GetNativeSystemInfo(&sysInfo);
-	return sysInfo.dwNumberOfProcessors;
+		::SYSTEM_INFO sysInfo;
+		::GetNativeSystemInfo(&sysInfo);
+		return sysInfo.dwNumberOfProcessors;
 #else
-	return ::sysconf(_SC_NPROCESSORS_ONLN);
+		return ::sysconf(_SC_NPROCESSORS_ONLN);
 #endif
+	}();
+
+	return g_count;
 }
 
 u32 utils::get_cpu_family()
