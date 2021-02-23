@@ -437,7 +437,7 @@ void cpu_thread::operator()()
 		}
 
 		// Can we have a little race, right? First thread is started concurrently with g_fxo->init()
-		std::this_thread::sleep_for(1ms);
+		thread_ctrl::wait_for(1000);
 	}
 
 	switch (id_type())
@@ -537,6 +537,8 @@ void cpu_thread::operator()()
 
 			g_tls_current_cpu_thread = nullptr;
 
+			g_threads_deleted++;
+
 			_this = nullptr;
 		}
 
@@ -590,8 +592,6 @@ void cpu_thread::operator()()
 
 cpu_thread::~cpu_thread()
 {
-	vm::cleanup_unlock(*this);
-	g_threads_deleted++;
 }
 
 cpu_thread::cpu_thread(u32 id)
